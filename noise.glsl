@@ -1310,7 +1310,8 @@ float valueNoiseFractalUnsigned1(float x, float lacunarity, float gain, uint lay
 /*
  * Macros to compute fractal versions of noise functions with the following parameters:
  *
- * tyAssignTo: The type representing the dimension of the noise function (typically `float`, but also `float, `vec2`, `vec3`, `vec4` for noise function derivatives)
+ * tyAssignTo: The type representing the dimension of the noise function (typically `float`, but also `float, `vec2`, `vec3`, `vec4` for noise function derivatives);
+ * tyInput: The type of `exprV` and consequently the type of the single argument of `identNoiseFunction`;
  * identAssignTo: The name of the variable of type `tyAssignTo` to assign the result to;
  * identNoiseFunction: The name of the base n-dimensional noise function;
  * exprV: The input vector;
@@ -1318,19 +1319,19 @@ float valueNoiseFractalUnsigned1(float x, float lacunarity, float gain, uint lay
  * exprGain: The modifier to multiply `exprV` each iteration;
  * exprLayers: The number of layers of the noise to sum up;
  */
-#define FRACTALIFY(tyAssignTo, identAssignTo, identNoiseFunction, exprV, exprLacunarity, exprGain, exprLayers) ;\
+#define FRACTALIFY(tyAssignTo, tyInput, identAssignTo, identNoiseFunction, exprV, exprLacunarity, exprGain, exprLayers) ;\
 tyAssignTo identAssignTo;                                                          \
 do {                                                                               \
     tyAssignTo result = tyAssignTo(0.0);                                           \
-    float inMultiplier = 1.0;                                                      \
-    float outMultiplier = 1.0;                                                     \
-    float range = 0.0;                                                             \
+    tyInput    inMultiplier = tyInput(1.0);                                        \
+    tyAssignTo outMultiplier = tyAssignTo(1.0);                                    \
+    tyAssignTo range = tyAssignTo(0.0);                                            \
                                                                                    \
     for (uint i = 0; i < uint(exprLayers); i++) {                                  \
         result += identNoiseFunction((exprV) * inMultiplier) * outMultiplier;      \
         range += outMultiplier;                                                    \
-        inMultiplier *= float(exprLacunarity);                                     \
-        outMultiplier *= float(exprGain);                                          \
+        inMultiplier *= tyInput(exprLacunarity);                                   \
+        outMultiplier *= tyAssignTo(exprGain);                                     \
     }                                                                              \
                                                                                    \
     tyAssignTo normalizedResult = result / range;                                  \
@@ -1338,9 +1339,9 @@ do {                                                                            
 } while(false);
 
 // A version of `FRACTALIFY`, where `exprGain = 1 / exprLacunarity`
-#define FRACTALIFY_PINK(tyAssignTo, identAssignTo, identNoiseFunction, exprV, exprLacunarity, exprLayers) \
-    FRACTALIFY(tyAssignTo, identAssignTo, identNoiseFunction, exprV, exprLacunarity, (1.0 / exprLacunarity), exprLayers)
+#define FRACTALIFY_PINK(tyAssignTo, tyInput, identAssignTo, identNoiseFunction, exprV, exprLacunarity, exprLayers) \
+    FRACTALIFY(tyAssignTo, tyInput, identAssignTo, identNoiseFunction, exprV, exprLacunarity, (1.0 / exprLacunarity), exprLayers)
 
 // A version of `FRACTALIFY`, where `exprLacunarity = 2` and `exprGain = 0.5`
-#define FRACTALIFY_BROWN(tyAssignTo, identAssignTo, identNoiseFunction, exprV, exprLayers) \
-    FRACTALIFY_PINK(tyAssignTo, identAssignTo, identNoiseFunction, exprV, 2.0, exprLayers)
+#define FRACTALIFY_BROWN(tyAssignTo, tyInput, identAssignTo, identNoiseFunction, exprV, exprLayers) \
+    FRACTALIFY_PINK(tyAssignTo, tyInput, identAssignTo, identNoiseFunction, exprV, 2.0, exprLayers)

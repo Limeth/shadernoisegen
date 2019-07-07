@@ -11,6 +11,16 @@ vec2  noiseInterpolationGradient(vec2  t) { return interpolationFunction##Gradie
 vec3  noiseInterpolationGradient(vec3  t) { return interpolationFunction##Gradient(t); } \
 vec4  noiseInterpolationGradient(vec4  t) { return interpolationFunction##Gradient(t); } \
 
+float linear(float t) { return t; }
+vec2  linear(vec2  t) { return t; }
+vec3  linear(vec3  t) { return t; }
+vec4  linear(vec4  t) { return t; }
+
+float linearGradient(float t) { return float(1); }
+vec2  linearGradient(vec2  t) { return  vec2(1); }
+vec3  linearGradient(vec3  t) { return  vec3(1); }
+vec4  linearGradient(vec4  t) { return  vec4(1); }
+
 float smoothStep(float t) { return t * t * (3 - 2 * t); }
 vec2  smoothStep(vec2 t)  { return t * t * (3 - 2 * t); }
 vec3  smoothStep(vec3 t)  { return t * t * (3 - 2 * t); }
