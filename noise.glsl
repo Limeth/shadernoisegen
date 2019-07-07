@@ -75,6 +75,150 @@ float hash2AsSignedFloat(vec2 v)  { return floatConstructSigned(hash2(v)); }
 float hash3AsSignedFloat(vec3 v)  { return floatConstructSigned(hash3(v)); }
 float hash4AsSignedFloat(vec4 v)  { return floatConstructSigned(hash4(v)); }
 
+/*
+ * Implementations of Quantile (inverse CDF) functions
+ */
+
+vec2 boxMuller2to2(vec2 uniformVector) {
+    float term1 = sqrt(-2 * log(uniformVector.x));
+    float term2 = TAU * uniformVector.y;
+
+    return vec2(
+        term1 * cos(term2),
+        term1 * sin(term2)
+    );
+}
+
+float boxMuller2to1(vec2 uniformVector) {
+    float term1 = sqrt(-2 * log(uniformVector.x));
+    float term2 = TAU * uniformVector.y;
+
+    return term1 * cos(term2);
+}
+
+// An implementation of pseudo random normal variable sampling using the
+// box-muller method
+float uboxMullerSample(uint seed) {
+    uint xHash = uhash1(seed);
+    uint yHash = uhash1(xHash);
+    float x = floatConstructUnsigned(xHash);
+    float y = floatConstructUnsigned(yHash);
+
+    return boxMuller2to1(vec2(x, y));
+}
+
+float iboxMullerSample(int seed) { return uboxMullerSample(uint(seed)); }
+float boxMullerSample(float seed) { return uboxMullerSample(floatBitsToUint(seed)); }
+
+/*
+ * These two following methods `branchlessNormalQuantileApprox` and
+ * `hybridNormalQuantileApprox` were taken from _Fast and Accurate Parallel
+ * Computation of Quantile Functions for Random Number Generation_ by _Thomas
+ * Luu_.
+ */
+float branchlessNormalQuantileApprox(float u) {
+    float ushift = u - 0.5f;
+    if (ushift > 0.0f) u = 1.0f - u;
+    float v = -log(u + u);
+    float p =   1.68267776058639e-6f;
+    p = p * v + 0.0007404314351202936f;
+    p = p * v + 0.03602364419560667f;
+    p = p * v + 0.4500443083534446f;
+    p = p * v + 1.861100468283588f;
+    p = p * v + 2.748475794390544f;
+    p = p * v + 1.253314132218524f;
+    float q =   0.00003709787159774307f;
+    q = q * v + 0.004513659269519104f;
+    q = q * v + 0.1101701640048184f;
+    q = q * v + 0.8410203004476538f;
+    q = q * v + 2.402969434512837f;
+    q = q * v + 2.692965915568952f;
+    q = q * v + 1.0f;
+    /* return __fdividef(p, q) * copysignf(v, ushift); */
+    return (p / q) * (abs(v) * sign(ushift));
+}
+
+float hybridNormalQuantileApprox(float u) {
+    float v, p, q, ushift;
+    ushift = u - 0.5f;
+    /* v = copysignf(ushift, 0.0f); */
+    v = abs(ushift);
+    if (v < 0.499433f) {
+        /* asm("rsqrt.approx.ftz.f32 %0,%1;" : "=f"(v) : "f"(u - u * u)); */
+        v = inversesqrt(u - u * u);
+        v *= 0.5f;
+        p =         0.001732781974270904f;
+        p = p * v + 0.1788417306083325f;
+        p = p * v + 2.804338363421083f;
+        p = p * v + 9.35716893191325f;
+        p = p * v + 5.283080058166861f;
+        p = p * v + 0.07885390444279965f;
+        p *= ushift;
+        q =         0.0001796248328874524f;
+        q = q * v + 0.02398533988976253f;
+        q = q * v + 0.4893072798067982f;
+        q = q * v + 2.406460595830034f;
+        q = q * v + 3.142947488363618f;
+    } else {
+        if (ushift > 0.0f) u = 1.0f - u;
+        /* asm("lg2.approx.ftz.f32 %0,%1;" : "=f"(v)) : "f"(u + u)); */
+        v = log2(u + u);
+        v *= -0.6931471805599453f;
+        if (v < 22.0f) {
+            p =         0.000382438382914666f;
+            p = p * v + 0.03679041341785685f;
+            p = p * v + 0.5242351532484291f;
+            p = p * v + 1.21642047402659f;
+            q =         9.14019972725528e-6f;
+            q = q * v + 0.003523083799369908f;
+            q = q * v + 0.126802543865968f;
+            q = q * v + 0.8502031783957995f;
+        } else {
+            p =         0.00001016962895771568f;
+            p = p * v + 0.003330096951634844f;
+            p = p * v + 0.1540146885433827f;
+            p = p * v + 1.045480394868638f;
+            q =         1.303450553973082e-7f;
+            q = q * v + 0.0001728926914526662f;
+            q = q * v + 0.02031866871146244f;
+            q = q * v + 0.3977137974626933f;
+        }
+        /* p *= copysignf(v, ushift); */
+        p *= abs(v) * sign(ushift);
+    }
+    q = q * v + 1.0f;
+    /* asm("rcp.approx.ftz.f32 %0,%1;" : "=f"(v) : "f"(q)); */
+    v = 1 / q;
+    return p * v;
+}
+
+float ubranchlessNormalQuantileApproxSample(uint seed) {
+    float uniformVariable = uhash1AsUnsignedFloat(seed);
+    return branchlessNormalQuantileApprox(uniformVariable);
+}
+float ibranchlessNormalQuantileApproxSample(int seed) { return ubranchlessNormalQuantileApproxSample(uint(seed)); }
+float branchlessNormalQuantileApproxSample(float seed) { return ubranchlessNormalQuantileApproxSample(floatBitsToUint(seed)); }
+
+float uhybridNormalQuantileApproxSample(uint seed) {
+    float uniformVariable = uhash1AsUnsignedFloat(seed);
+    return hybridNormalQuantileApprox(uniformVariable);
+}
+float ihybridNormalQuantileApproxSample(int seed) { return uhybridNormalQuantileApproxSample(uint(seed)); }
+float hybridNormalQuantileApproxSample(float seed) { return uhybridNormalQuantileApproxSample(floatBitsToUint(seed)); }
+
+/*
+ * Shorthands for the preferred way of sampling normally distributed random
+ * variables
+ */
+float unormal(uint seed) { return uboxMullerSample(seed); }
+float inormal(int seed) { return iboxMullerSample(seed); }
+float normal(float seed) { return boxMullerSample(seed); }
+
+/*
+ * Methods to generate a random unit vector. Implementations up to 3 dimensions
+ * use the closed-form formula, which does not exist for higher dimensions,
+ * where we have to use normally distributed random variable sampling.
+ */
 float ihash1AsUnitVec1(int x) {
     uint hash = ihash1(x);
     return ((hash & 1) == 0) ? -1.0 : 1.0;
@@ -94,13 +238,70 @@ vec3 ihash3AsUnitVec3(ivec3 v) {
     return vec3(cos(phi) * sin(theta), sin(phi) * sin(theta), cos(theta));
 }
 
-// TODO: Figure out how to generate a deterministically random 4D unit vector
-/* vec4 ihash3AsUnitVec3(vec4 v); */
+vec4 ihash4AsUnitVec4(ivec4 v) {
+    const float maxCoord = uintBitsToFloat(0x7f7fffff);
+    const float minCoord = uintBitsToFloat(0xff7fffff);
+    uint hash1 = ihash4(v);
+    uint hash2 = uhash1(hash1);
+    uint hash3 = uhash1(hash2);
+    uint hash4 = uhash1(hash3);
+    float normal1 = unormal(hash1);
+    float normal2 = unormal(hash2);
+    float normal3 = unormal(hash3);
+    float normal4 = unormal(hash4);
+    vec4 vector = vec4(
+        clamp(normal1, minCoord, maxCoord),
+        clamp(normal2, minCoord, maxCoord),
+        clamp(normal3, minCoord, maxCoord),
+        clamp(normal4, minCoord, maxCoord)
+    );
+
+    return normalize(vector);
+}
+
+/*
+ * Derivation:
+ * mix(a, b, t) = a * (1 - t) + b * t
+ * mix(a, b, t) = a - at + b * t
+ *
+ * dmix(a, b, t)/dt = d(a - at + b * t)/dt
+ * dmix(a, b, t)/dt = -a + b
+ *
+ * dmix(a, b, t)/da = d(a - at + b * t)/da
+ * dmix(a, b, t)/da = 1 - t
+ *
+ * dmix(a, b, t)/db = d(a - at + b * t)/db
+ * dmix(a, b, t)/db = t
+ */
+float mixDerivativeT(float a, float b, float t) { return b - a; }
+float mixDerivativeA(float a, float b, float t) { return 1 - t; }
+float mixDerivativeB(float a, float b, float t) { return     t; }
+/* vec2  mixDerivativePartialT2(vec2  a, vec2  b, float t) { return vec2(b - a); } */
+/* vec2  mixDerivativePartialA2(vec2  a, vec2  b, float t) { return vec2(1 - t); } */
+/* vec2  mixDerivativePartialB2(vec2  a, vec2  b, float t) { return vec2(    t); } */
+/* vec3  mixDerivativePartialT3(vec3  a, vec3  b, float t) { return vec3(b - a); } */
+/* vec3  mixDerivativePartialA3(vec3  a, vec3  b, float t) { return vec3(1 - t); } */
+/* vec3  mixDerivativePartialB3(vec3  a, vec3  b, float t) { return vec3(    t); } */
+/* vec4  mixDerivativePartialT4(vec4  a, vec4  b, float t) { return vec4(b - a); } */
+/* vec4  mixDerivativePartialA4(vec4  a, vec4  b, float t) { return vec4(1 - t); } */
+/* vec4  mixDerivativePartialB4(vec4  a, vec4  b, float t) { return vec4(    t); } */
 
 float smoothStep1(float t) { return t * t * (3 - 2 * t); }
 vec2  smoothStep2(vec2 t)  { return t * t * (3 - 2 * t); }
 vec3  smoothStep3(vec3 t)  { return t * t * (3 - 2 * t); }
 vec4  smoothStep4(vec4 t)  { return t * t * (3 - 2 * t); }
+
+/*
+ * Derivation:
+ * smoothStep(t) = t * t * (3 - 2 * t)
+ * smoothStep(t) = 3t^2 - 2t^3
+ * smoothStep'(t) = 6t - 6t^2
+ * smoothStep'(t) = 6t * (1 - t)
+ */
+float smoothStepDerivative1(float t) { return 6 * t * (1 - t); }
+vec2  smoothStepDerivative2(vec2 t)  { return 6 * t * (1 - t); }
+vec3  smoothStepDerivative3(vec3 t)  { return 6 * t * (1 - t); }
+vec4  smoothStepDerivative4(vec4 t)  { return 6 * t * (1 - t); }
 
 float quintic1(float t) { return t * t * t * (t * (t * 6 - 15) + 10); }
 vec2  quintic2(vec2  t) { return t * t * t * (t * (t * 6 - 15) + 10); }
@@ -122,6 +323,53 @@ float valueNoiseUnsigned1(float x) {
     return mix(l0Hash, l1Hash, tMapped);
 }
 
+/*
+ * Hand-expanded derivation, see `valueNoiseUnsignedDerivative1` for a general
+ * solution. See `smoothStepDerivative1` and `mixDerivativeT` for
+ * solutions to partial derivatives of used functions.
+ *
+ * f(t) = mix(l0, l1, smoothStep(t))
+ * f'(t) = mix'(l0, l1, smoothStep(t)) * smoothStep'(t)
+ * f'(t) = (l1 - l0) * 6t (1 - t);
+ */
+float valueNoiseUnsignedDerivativeCustom1(float x) {
+    // Lattice point integer coordinates
+    int l0 = int(floor(x));
+    int l1 = l0 + 1;
+    // Deterministically random values for lattice points
+    float l0Hash = ihash1AsUnsignedFloat(l0);
+    float l1Hash = ihash1AsUnsignedFloat(l1);
+    // Interpolation
+    float t = fract(x);
+
+    return (l1Hash - l0Hash) * 6 * t * (1 - t);
+}
+
+float valueNoiseUnsignedGradient1(float x) {
+    // Lattice point integer coordinates
+    int l0 = int(floor(x));
+    int l1 = l0 + 1;
+    // Deterministically random values for lattice points
+    float l0Hash = ihash1AsUnsignedFloat(l0);
+    float l1Hash = ihash1AsUnsignedFloat(l1);
+    // Interpolation
+    float t = fract(x);
+    float tMapped = smoothStep1(t);
+    float tMappedDerivative = smoothStepDerivative1(t);
+
+    /*
+     * z = dmix(a, b, t2)
+     * dmix(l0, l1, smoothStep(t))/dt =
+     *   (dmix(l0, l1, smoothStep(t))/da) * (da/dt) (= 0)
+     *   (dmix(l0, l1, smoothStep(t))/db) * (db/dt) (= 0)
+     *   (dmix(l0, l1, smoothStep(t))/dt2) * (dt2/dt)
+     * because
+     *   da/dt = 0
+     *   db/dt = 0
+     */
+    return mixDerivativeT(l0Hash, l1Hash, tMapped) * tMappedDerivative;
+}
+
 float valueNoiseUnsigned2(vec2 v) {
     // Lattice point integer coordinates
     ivec2 l00 = ivec2(floor(v));
@@ -141,6 +389,77 @@ float valueNoiseUnsigned2(vec2 v) {
         mix(l00Hash, l01Hash, tMapped.y),
         mix(l10Hash, l11Hash, tMapped.y),
         tMapped.x
+    );
+}
+
+vec2 valueNoiseUnsignedGradient2(vec2 v) {
+    // Lattice point integer coordinates
+    ivec2 l00 = ivec2(floor(v));
+    ivec2 l01 = l00 + ivec2(0, 1);
+    ivec2 l10 = l00 + ivec2(1, 0);
+    ivec2 l11 = l00 + ivec2(1, 1);
+    // Deterministically random values for lattice points
+    float l00Hash = ihash2AsUnsignedFloat(l00);
+    float l01Hash = ihash2AsUnsignedFloat(l01);
+    float l10Hash = ihash2AsUnsignedFloat(l10);
+    float l11Hash = ihash2AsUnsignedFloat(l11);
+    // Interpolation
+    vec2 t = fract(v);
+    vec2 tMapped = smoothStep2(t);
+    vec2 tMappedDerivative = smoothStepDerivative2(t);
+
+    /*
+     * Differentiate with respect to t.x and t.y:
+     *
+     * z = dmix(a, b, t)
+     *
+     * dz/dtx:
+     * dmix(mix(l00, l01, smoothStep(t).y), mix(l00, l01, smoothStep(t).y), smoothStep(t).x)/dtx =
+     * + (dmix(mix(l00, l01, smoothStep(t).y), mix(l00, l01, smoothStep(t).y), smoothStep(t).x)/da) * (da/dtx)
+     * + (dmix(mix(l00, l01, smoothStep(t).y), mix(l00, l01, smoothStep(t).y), smoothStep(t).x)/db) * (db/dtx)
+     * + (dmix(mix(l00, l01, smoothStep(t).y), mix(l00, l01, smoothStep(t).y), smoothStep(t).x)/dt) * (dt/dtx)
+     * where
+     * da/dtx = dmix(l00, l01, smoothStep(t).y)/dtx =
+     * + (dmix(l00, l01, smoothStep(t).y)/dai) * (dai/dtx) (= 0)
+     * + (dmix(l00, l01, smoothStep(t).y)/dbi) * (dbi/dtx) (= 0)
+     * + (dmix(l00, l01, smoothStep(t).y)/dti) * (dti/dtx) (= 0)
+     * db/dtx = analogously (= 0)
+     * dt/dtx = d(smoothStep(t).x)/dtx
+     *
+     * dz/dty:
+     * dmix(mix(l00, l01, smoothStep(t).y), mix(l00, l01, smoothStep(t).y), smoothStep(t).x)/dtx =
+     * + (dmix(mix(l00, l01, smoothStep(t).y), mix(l00, l01, smoothStep(t).y), smoothStep(t).x)/da) * (da/dty)
+     * + (dmix(mix(l00, l01, smoothStep(t).y), mix(l00, l01, smoothStep(t).y), smoothStep(t).x)/db) * (db/dty)
+     * + (dmix(mix(l00, l01, smoothStep(t).y), mix(l00, l01, smoothStep(t).y), smoothStep(t).x)/dt) * (dt/dty)
+     * where
+     * da/dty = dmix(l00, l01, smoothStep(t).y)/dtx =
+     * + (dmix(l00, l01, smoothStep(t).y)/dai) * (dai/dty) (= 0)
+     * + (dmix(l00, l01, smoothStep(t).y)/dbi) * (dbi/dty) (= 0)
+     * + (dmix(l00, l01, smoothStep(t).y)/dti) * (dti/dty)
+     *      where
+     *      dti/dty = d(smoothStep(t).y)/dty
+     *
+     * db/dty = analogously
+     * dt/dty = d(smoothStep(t).x)/dty (= 0)
+     */
+
+    return vec2(
+        mixDerivativeT(
+            mix(l00Hash, l01Hash, tMapped.y),
+            mix(l10Hash, l11Hash, tMapped.y),
+            tMapped.x
+        ) * tMappedDerivative.x,
+
+        mixDerivativeA(
+            mix(l00Hash, l01Hash, tMapped.y),
+            mix(l10Hash, l11Hash, tMapped.y),
+            tMapped.x
+        ) * mixDerivativeT(l00Hash, l01Hash, tMapped.y) * tMappedDerivative.y
+        + mixDerivativeB(
+            mix(l00Hash, l01Hash, tMapped.y),
+            mix(l10Hash, l11Hash, tMapped.y),
+            tMapped.x
+        ) * mixDerivativeT(l10Hash, l11Hash, tMapped.y) * tMappedDerivative.y
     );
 }
 
@@ -180,6 +499,241 @@ float valueNoiseUnsigned3(vec3 v) {
         ),
         tMapped.x
     );
+}
+
+vec3 valueNoiseUnsignedGradient3(vec3 v) {
+    // Lattice point integer coordinates
+    ivec3 l000 = ivec3(floor(v));
+    ivec3 l001 = l000 + ivec3(0, 0, 1);
+    ivec3 l010 = l000 + ivec3(0, 1, 0);
+    ivec3 l011 = l000 + ivec3(0, 1, 1);
+    ivec3 l100 = l000 + ivec3(1, 0, 0);
+    ivec3 l101 = l000 + ivec3(1, 0, 1);
+    ivec3 l110 = l000 + ivec3(1, 1, 0);
+    ivec3 l111 = l000 + ivec3(1, 1, 1);
+    // Deterministically random values for lattice points
+    float l000Hash = ihash3AsUnsignedFloat(l000);
+    float l001Hash = ihash3AsUnsignedFloat(l001);
+    float l010Hash = ihash3AsUnsignedFloat(l010);
+    float l011Hash = ihash3AsUnsignedFloat(l011);
+    float l100Hash = ihash3AsUnsignedFloat(l100);
+    float l101Hash = ihash3AsUnsignedFloat(l101);
+    float l110Hash = ihash3AsUnsignedFloat(l110);
+    float l111Hash = ihash3AsUnsignedFloat(l111);
+    // Interpolation
+    vec3 t = fract(v);
+    vec3 tMapped = smoothStep3(t);
+    vec3 tMappedDerivative = smoothStepDerivative3(t);
+
+    /*
+     * Differentiate with respect to t.x, t.y and t.z:
+     *
+     * z = dmix(a, b, t)
+     *
+     * dz/dtx:
+     * dmix(mix(mix(l000, l001, smoothStep(t).z), mix(l010, l011, smoothStep(t).z), smoothStep(t).y), mix(mix(l100, l101, smoothStep(t).z), mix(l110, l111, smoothStep(t).z), smoothStep(t).y), smoothStep(t).x)/dtx =
+     *   (dmix(mix(mix(l000, l001, smoothStep(t).z), mix(l010, l011, smoothStep(t).z), smoothStep(t).y), mix(mix(l100, l101, smoothStep(t).z), mix(l110, l111, smoothStep(t).z), smoothStep(t).y), smoothStep(t).x)/da) * (da/dtx) (= 0, see below)
+     * + (dmix(mix(mix(l000, l001, smoothStep(t).z), mix(l010, l011, smoothStep(t).z), smoothStep(t).y), mix(mix(l100, l101, smoothStep(t).z), mix(l110, l111, smoothStep(t).z), smoothStep(t).y), smoothStep(t).x)/db) * (db/dtx) (= 0, see below)
+     * + (dmix(mix(mix(l000, l001, smoothStep(t).z), mix(l010, l011, smoothStep(t).z), smoothStep(t).y), mix(mix(l100, l101, smoothStep(t).z), mix(l110, l111, smoothStep(t).z), smoothStep(t).y), smoothStep(t).x)/dt) * (dt/dtx)
+     *   where
+     *   da/dtx = (dmix(mix(l000, l001, smoothStep(t).z), mix(l010, l011, smoothStep(t).z), smoothStep(t).y)/dtx) =
+     *     (dmix(mix(l000, l001, smoothStep(t).z), mix(l010, l011, smoothStep(t).z), smoothStep(t).y)/dai) * (dai/dtx) (= 0, see below)
+     *   + (dmix(mix(l000, l001, smoothStep(t).z), mix(l010, l011, smoothStep(t).z), smoothStep(t).y)/dbi) * (dbi/dtx) (= 0, see below)
+     *   + (dmix(mix(l000, l001, smoothStep(t).z), mix(l010, l011, smoothStep(t).z), smoothStep(t).y)/dti) * (dti/dtx) (= 0, see below)
+     *     where
+     *     dai/dtx = dmix(l000, l001, smoothStep(t).z)/dtx = 0
+     *     dbi/dtx = 0 (analogously)
+     *     dti/dtx = 0 (analogously)
+     *     therefore
+     *     da/dtx = 0
+     *   db/dtx = 0 (analogously)
+     *   dt/dtx = d(smoothStep(t).x)/dtx
+     *   therefore
+     *   dz/dtx = (dmix(mix(mix(l000, l001, smoothStep(t).z), mix(l010, l011, smoothStep(t).z), smoothStep(t).y), mix(mix(l100, l101, smoothStep(t).z), mix(l110, l111, smoothStep(t).z), smoothStep(t).y), smoothStep(t).x)/dt) * (d(smoothStep(t).x)/dtx)
+     *
+     * dz/dty:
+     * dmix(mix(mix(l000, l001, smoothStep(t).z), mix(l010, l011, smoothStep(t).z), smoothStep(t).y), mix(mix(l100, l101, smoothStep(t).z), mix(l110, l111, smoothStep(t).z), smoothStep(t).y), smoothStep(t).x)/dty =
+     *   (dmix(mix(mix(l000, l001, smoothStep(t).z), mix(l010, l011, smoothStep(t).z), smoothStep(t).y), mix(mix(l100, l101, smoothStep(t).z), mix(l110, l111, smoothStep(t).z), smoothStep(t).y), smoothStep(t).x)/da) * (da/dty)
+     * + (dmix(mix(mix(l000, l001, smoothStep(t).z), mix(l010, l011, smoothStep(t).z), smoothStep(t).y), mix(mix(l100, l101, smoothStep(t).z), mix(l110, l111, smoothStep(t).z), smoothStep(t).y), smoothStep(t).x)/db) * (db/dty)
+     * + (dmix(mix(mix(l000, l001, smoothStep(t).z), mix(l010, l011, smoothStep(t).z), smoothStep(t).y), mix(mix(l100, l101, smoothStep(t).z), mix(l110, l111, smoothStep(t).z), smoothStep(t).y), smoothStep(t).x)/dt) * (dt/dty)
+     *   where
+     *   da/dty = (dmix(mix(l000, l001, smoothStep(t).z), mix(l010, l011, smoothStep(t).z), smoothStep(t).y)/dty) =
+     *     (dmix(mix(l000, l001, smoothStep(t).z), mix(l010, l011, smoothStep(t).z), smoothStep(t).y)/dai) * (dai/dty) (= 0, see below)
+     *   + (dmix(mix(l000, l001, smoothStep(t).z), mix(l010, l011, smoothStep(t).z), smoothStep(t).y)/dbi) * (dbi/dty) (= 0, see below)
+     *   + (dmix(mix(l000, l001, smoothStep(t).z), mix(l010, l011, smoothStep(t).z), smoothStep(t).y)/dti) * (dti/dty)
+     *     where
+     *     dai/dty = dmix(l000, l001, smoothStep(t).z)/dty = 0
+     *     dbi/dty = 0 (analogously)
+     *     dti/dty = d(smoothStep(t).y)/dty
+     *     therefore
+     *     da/dty = (dmix(mix(l000, l001, smoothStep(t).z), mix(l010, l011, smoothStep(t).z), smoothStep(t).y)/dti) * (dti/dty)
+     *            = (dmix(mix(l000, l001, smoothStep(t).z), mix(l010, l011, smoothStep(t).z), smoothStep(t).y)/dti) * (d(smoothStep(t).y)/dty)
+     *   db/dty = (analogously) = (dmix(mix(l100, l101, smoothStep(t).z), mix(l110, l111, smoothStep(t).z), smoothStep(t).y)/dti) * (dti/dty)
+     *          = (dmix(mix(l100, l101, smoothStep(t).z), mix(l110, l111, smoothStep(t).z), smoothStep(t).y)/dti) * (d(smoothStep(t).y)/dty)
+     *   dt/dty = d(smoothStep(t).x)/dty = 0
+     *   therefore
+     *   dz/dty =
+     *     (dmix(mix(mix(l000, l001, smoothStep(t).z), mix(l010, l011, smoothStep(t).z), smoothStep(t).y), mix(mix(l100, l101, smoothStep(t).z), mix(l110, l111, smoothStep(t).z), smoothStep(t).y), smoothStep(t).x)/da)
+     *   * (dmix(mix(l000, l001, smoothStep(t).z), mix(l010, l011, smoothStep(t).z), smoothStep(t).y)/dti) * (d(smoothStep(t).y)/dty)
+     *   + (dmix(mix(mix(l000, l001, smoothStep(t).z), mix(l010, l011, smoothStep(t).z), smoothStep(t).y), mix(mix(l100, l101, smoothStep(t).z), mix(l110, l111, smoothStep(t).z), smoothStep(t).y), smoothStep(t).x)/db)
+     *   * (dmix(mix(l100, l101, smoothStep(t).z), mix(l110, l111, smoothStep(t).z), smoothStep(t).y)/dti) * (d(smoothStep(t).y)/dty)
+     *
+     * dz/dtz:
+     * dmix(mix(mix(l000, l001, smoothStep(t).z), mix(l010, l011, smoothStep(t).z), smoothStep(t).y), mix(mix(l100, l101, smoothStep(t).z), mix(l110, l111, smoothStep(t).z), smoothStep(t).y), smoothStep(t).x)/dtz =
+     *   (dmix(mix(mix(l000, l001, smoothStep(t).z), mix(l010, l011, smoothStep(t).z), smoothStep(t).y), mix(mix(l100, l101, smoothStep(t).z), mix(l110, l111, smoothStep(t).z), smoothStep(t).y), smoothStep(t).x)/da) * (da/dtz)
+     * + (dmix(mix(mix(l000, l001, smoothStep(t).z), mix(l010, l011, smoothStep(t).z), smoothStep(t).y), mix(mix(l100, l101, smoothStep(t).z), mix(l110, l111, smoothStep(t).z), smoothStep(t).y), smoothStep(t).x)/db) * (db/dtz)
+     * + (dmix(mix(mix(l000, l001, smoothStep(t).z), mix(l010, l011, smoothStep(t).z), smoothStep(t).y), mix(mix(l100, l101, smoothStep(t).z), mix(l110, l111, smoothStep(t).z), smoothStep(t).y), smoothStep(t).x)/dt) * (dt/dtz)
+     *   where
+     *   da/dtz = (dmix(mix(l000, l001, smoothStep(t).z), mix(l010, l011, smoothStep(t).z), smoothStep(t).y)/dtz) =
+     *     (dmix(mix(l000, l001, smoothStep(t).z), mix(l010, l011, smoothStep(t).z), smoothStep(t).y)/dai) * (dai/dtz)
+     *   + (dmix(mix(l000, l001, smoothStep(t).z), mix(l010, l011, smoothStep(t).z), smoothStep(t).y)/dbi) * (dbi/dtz)
+     *   + (dmix(mix(l000, l001, smoothStep(t).z), mix(l010, l011, smoothStep(t).z), smoothStep(t).y)/dti) * (dti/dtz) (= 0, see below)
+     *     where
+     *     dai/dtz = dmix(l000, l001, smoothStep(t).z)/dtz = (dmix(l000, l001, smoothStep(t).z)/dtii) * (d(smoothStep(t).z)/dtz)
+     *     dbi/dtz = dmix(l010, l011, smoothStep(t).z)/dtz = (dmix(l010, l011, smoothStep(t).z)/dtii) * (d(smoothStep(t).z)/dtz)
+     *     dti/dtz = d(smoothStep(t).y)/dtz = 0
+     *     therefore
+     *     da/dtz = (dmix(mix(l000, l001, smoothStep(t).z), mix(l010, l011, smoothStep(t).z), smoothStep(t).y)/dai) * (dai/dtz)
+     *            + (dmix(mix(l000, l001, smoothStep(t).z), mix(l010, l011, smoothStep(t).z), smoothStep(t).y)/dbi) * (dbi/dtz)
+     *            = (dmix(mix(l000, l001, smoothStep(t).z), mix(l010, l011, smoothStep(t).z), smoothStep(t).y)/dai)
+     *            * (dmix(l000, l001, smoothStep(t).z)/dtii) * (d(smoothStep(t).z)/dtz)
+     *            + (dmix(mix(l000, l001, smoothStep(t).z), mix(l010, l011, smoothStep(t).z), smoothStep(t).y)/dbi)
+     *            * (dmix(l010, l011, smoothStep(t).z)/dtii) * (d(smoothStep(t).z)/dtz))
+     *   db/dtz = (analogously) =
+     *          = (dmix(mix(l100, l001, smoothStep(t).z), mix(l110, l011, smoothStep(t).z), smoothStep(t).y)/dai) * (dai/dtz)
+     *          + (dmix(mix(l100, l001, smoothStep(t).z), mix(l110, l011, smoothStep(t).z), smoothStep(t).y)/dbi) * (dbi/dtz)
+     *          = (dmix(mix(l100, l101, smoothStep(t).z), mix(l110, l111, smoothStep(t).z), smoothStep(t).y)/dai)
+     *          * (dmix(l100, l101, smoothStep(t).z)/dtii) * (d(smoothStep(t).z)/dtz))
+     *          + (dmix(mix(l100, l101, smoothStep(t).z), mix(l110, l111, smoothStep(t).z), smoothStep(t).y)/dbi)
+     *          * (dmix(l110, l111, smoothStep(t).z)/dtii) * (d(smoothStep(t).z)/dtz))
+     *   dt/dtz = d(smoothStep(t).x)/dtz = 0
+     *   therefore
+     *   dz/dtz =
+     *     (dmix(mix(mix(l000, l001, smoothStep(t).z), mix(l010, l011, smoothStep(t).z), smoothStep(t).y), mix(mix(l100, l101, smoothStep(t).z), mix(l110, l111, smoothStep(t).z), smoothStep(t).y), smoothStep(t).x)/da)
+     *     * ((dmix(mix(l000, l001, smoothStep(t).z), mix(l010, l011, smoothStep(t).z), smoothStep(t).y)/dai) * (dmix(l000, l001, smoothStep(t).z)/dtii) * (d(smoothStep(t).z)/dtz)
+     *        + (dmix(mix(l000, l001, smoothStep(t).z), mix(l010, l011, smoothStep(t).z), smoothStep(t).y)/dbi) * (dmix(l010, l011, smoothStep(t).z)/dtii) * (d(smoothStep(t).z)/dtz)))
+     *   + (dmix(mix(mix(l000, l001, smoothStep(t).z), mix(l010, l011, smoothStep(t).z), smoothStep(t).y), mix(mix(l100, l101, smoothStep(t).z), mix(l110, l111, smoothStep(t).z), smoothStep(t).y), smoothStep(t).x)/db)
+     *      * ((dmix(mix(l100, l101, smoothStep(t).z), mix(l110, l111, smoothStep(t).z), smoothStep(t).y)/dai) * (dmix(l100, l101, smoothStep(t).z)/dtii) * (d(smoothStep(t).z)/dtz))
+     *         + (dmix(mix(l100, l101, smoothStep(t).z), mix(l110, l111, smoothStep(t).z), smoothStep(t).y)/dbi) * (dmix(l110, l111, smoothStep(t).z)/dtii) * (d(smoothStep(t).z)/dtz)))
+     */
+
+    return vec3(
+        // dz/dtx
+        mixDerivativeT(
+            mix(
+                mix(l000Hash, l001Hash, tMapped.z),
+                mix(l010Hash, l011Hash, tMapped.z),
+                tMapped.y
+            ),
+            mix(
+                mix(l100Hash, l101Hash, tMapped.z),
+                mix(l110Hash, l111Hash, tMapped.z),
+                tMapped.y
+            ),
+            tMapped.x
+        ) * tMappedDerivative.x,
+
+        // dz/dty
+        mixDerivativeA(
+            mix(
+                mix(l000Hash, l001Hash, tMapped.z),
+                mix(l010Hash, l011Hash, tMapped.z),
+                tMapped.y
+            ),
+            mix(
+                mix(l100Hash, l101Hash, tMapped.z),
+                mix(l110Hash, l111Hash, tMapped.z),
+                tMapped.y
+            ),
+            tMapped.x
+        ) * mixDerivativeT(
+            mix(l000Hash, l001Hash, tMapped.z),
+            mix(l010Hash, l011Hash, tMapped.z),
+            tMapped.y
+        ) * tMappedDerivative.y
+        + mixDerivativeB(
+            mix(
+                mix(l000Hash, l001Hash, tMapped.z),
+                mix(l010Hash, l011Hash, tMapped.z),
+                tMapped.y
+            ),
+            mix(
+                mix(l100Hash, l101Hash, tMapped.z),
+                mix(l110Hash, l111Hash, tMapped.z),
+                tMapped.y
+            ),
+            tMapped.x
+        ) * mixDerivativeT(
+            mix(l100Hash, l101Hash, tMapped.z),
+            mix(l110Hash, l111Hash, tMapped.z),
+            tMapped.y
+        ) * tMappedDerivative.y,
+
+        // dz/dtz
+           mixDerivativeA(mix(mix(l000Hash, l001Hash, tMapped.z), mix(l010Hash, l011Hash, tMapped.z), tMapped.y), mix(mix(l100Hash, l101Hash, tMapped.z), mix(l110Hash, l111Hash, tMapped.z), tMapped.y), tMapped.x)
+           * (mixDerivativeA(mix(l000Hash, l001Hash, tMapped.z), mix(l010Hash, l011Hash, tMapped.z), tMapped.y) * mixDerivativeT(l000Hash, l001Hash, tMapped.z) * tMappedDerivative.z
+              + mixDerivativeB(mix(l000Hash, l001Hash, tMapped.z), mix(l010Hash, l011Hash, tMapped.z), tMapped.y) * mixDerivativeT(l010Hash, l011Hash, tMapped.z) * tMappedDerivative.z)
+         + mixDerivativeB(mix(mix(l000Hash, l001Hash, tMapped.z), mix(l010Hash, l011Hash, tMapped.z), tMapped.y), mix(mix(l100Hash, l101Hash, tMapped.z), mix(l110Hash, l111Hash, tMapped.z), tMapped.y), tMapped.x)
+            * (mixDerivativeA(mix(l100Hash, l101Hash, tMapped.z), mix(l110Hash, l111Hash, tMapped.z), tMapped.y) * mixDerivativeT(l100Hash, l101Hash, tMapped.z) * tMappedDerivative.z
+               + mixDerivativeB(mix(l100Hash, l101Hash, tMapped.z), mix(l110Hash, l111Hash, tMapped.z), tMapped.y) * mixDerivativeT(l110Hash, l111Hash, tMapped.z) * tMappedDerivative.z)
+    );
+
+    /* return vec2( */
+    /*     mixDerivativeT( */
+    /*         mix( */
+    /*             mix(l000Hash, l001Hash, tMapped.z), */
+    /*             mix(l010Hash, l011Hash, tMapped.z), */
+    /*             tMapped.y */
+    /*         ), */
+    /*         mix( */
+    /*             mix(l100Hash, l101Hash, tMapped.z), */
+    /*             mix(l110Hash, l111Hash, tMapped.z), */
+    /*             tMapped.y */
+    /*         ), */
+    /*         tMapped.x */
+    /*     ) * tMappedDerivative.x, */
+
+    /*     mixDerivativeA( */
+    /*         mix( */
+    /*             mix(l000Hash, l001Hash, tMapped.z), */
+    /*             mix(l010Hash, l011Hash, tMapped.z), */
+    /*             tMapped.y */
+    /*         ), */
+    /*         mix( */
+    /*             mix(l100Hash, l101Hash, tMapped.z), */
+    /*             mix(l110Hash, l111Hash, tMapped.z), */
+    /*             tMapped.y */
+    /*         ), */
+    /*         tMapped.x */
+    /*     ) * mixDerivativeT(l00Hash, l01Hash, tMapped.y) * tMappedDerivative.y */
+    /*     + mixDerivativeB( */
+    /*         mix( */
+    /*             mix(l000Hash, l001Hash, tMapped.z), */
+    /*             mix(l010Hash, l011Hash, tMapped.z), */
+    /*             tMapped.y */
+    /*         ), */
+    /*         mix( */
+    /*             mix(l100Hash, l101Hash, tMapped.z), */
+    /*             mix(l110Hash, l111Hash, tMapped.z), */
+    /*             tMapped.y */
+    /*         ), */
+    /*         tMapped.x */
+    /*     ) * mixDerivativeT(l10Hash, l11Hash, tMapped.y) * tMappedDerivative.y */
+    /* ); */
+
+    /* return mix( */
+    /*     mix( */
+    /*         mix(l000Hash, l001Hash, tMapped.z), */
+    /*         mix(l010Hash, l011Hash, tMapped.z), */
+    /*         tMapped.y */
+    /*     ), */
+    /*     mix( */
+    /*         mix(l100Hash, l101Hash, tMapped.z), */
+    /*         mix(l110Hash, l111Hash, tMapped.z), */
+    /*         tMapped.y */
+    /*     ), */
+    /*     tMapped.x */
+    /* ); */
 }
 
 float valueNoiseUnsigned4(vec4 v) {
@@ -253,9 +807,13 @@ float valueNoiseUnsigned4(vec4 v) {
 }
 
 float valueNoiseSigned1(float x) { return valueNoiseUnsigned1(x) * 2.0 - 1.0; }
-float valueNoiseSigned2(vec2 v) { return valueNoiseUnsigned2(v) * 2.0 - 1.0; }
-float valueNoiseSigned3(vec3 v) { return valueNoiseUnsigned3(v) * 2.0 - 1.0; }
-float valueNoiseSigned4(vec4 v) { return valueNoiseUnsigned4(v) * 2.0 - 1.0; }
+float valueNoiseSigned2(vec2 v)  { return valueNoiseUnsigned2(v) * 2.0 - 1.0; }
+float valueNoiseSigned3(vec3 v)  { return valueNoiseUnsigned3(v) * 2.0 - 1.0; }
+float valueNoiseSigned4(vec4 v)  { return valueNoiseUnsigned4(v) * 2.0 - 1.0; }
+float valueNoiseSignedGradient1(float x) { return valueNoiseUnsignedGradient1(x) * 2.0; }
+vec2  valueNoiseSignedGradient2(vec2 v)  { return valueNoiseUnsignedGradient2(v) * 2.0; }
+vec3  valueNoiseSignedGradient3(vec3 v)  { return valueNoiseUnsignedGradient3(v) * 2.0; }
+/* vec4  valueNoiseSignedGradient4(vec4 v)  { return valueNoiseUnsignedGradient4(v) * 2.0; } */
 
 float perlinNoiseSigned1(float x) {
     // Lattice point integer coordinates
@@ -266,7 +824,7 @@ float perlinNoiseSigned1(float x) {
     float l1Hash = ihash1AsUnitVec1(l1);
     // Vectors to X from each lattice point
     float v0 = fract(x);
-    float v1 = float(v0.x - 1);
+    float v1 = float(v0 - 1);
     // Interpolation
     float t = v0;
     float tMapped = smoothStep1(t);
@@ -372,9 +930,129 @@ float perlinNoiseSigned3(vec3 v) {
     );
 }
 
+float perlinNoiseSigned4(vec4 v) {
+    // Lattice point integer coordinates
+    ivec4 l0000 = ivec4(floor(v));
+    ivec4 l0001 = l0000 + ivec4(0, 0, 0, 1);
+    ivec4 l0010 = l0000 + ivec4(0, 0, 1, 0);
+    ivec4 l0011 = l0000 + ivec4(0, 0, 1, 1);
+    ivec4 l0100 = l0000 + ivec4(0, 1, 0, 0);
+    ivec4 l0101 = l0000 + ivec4(0, 1, 0, 1);
+    ivec4 l0110 = l0000 + ivec4(0, 1, 1, 0);
+    ivec4 l0111 = l0000 + ivec4(0, 1, 1, 1);
+    ivec4 l1000 = l0000 + ivec4(1, 0, 0, 0);
+    ivec4 l1001 = l0000 + ivec4(1, 0, 0, 1);
+    ivec4 l1010 = l0000 + ivec4(1, 0, 1, 0);
+    ivec4 l1011 = l0000 + ivec4(1, 0, 1, 1);
+    ivec4 l1100 = l0000 + ivec4(1, 1, 0, 0);
+    ivec4 l1101 = l0000 + ivec4(1, 1, 0, 1);
+    ivec4 l1110 = l0000 + ivec4(1, 1, 1, 0);
+    ivec4 l1111 = l0000 + ivec4(1, 1, 1, 1);
+    // Deterministically random values for lattice points
+    vec4 l0000Hash = ihash4AsUnitVec4(l0000);
+    vec4 l0001Hash = ihash4AsUnitVec4(l0001);
+    vec4 l0010Hash = ihash4AsUnitVec4(l0010);
+    vec4 l0011Hash = ihash4AsUnitVec4(l0011);
+    vec4 l0100Hash = ihash4AsUnitVec4(l0100);
+    vec4 l0101Hash = ihash4AsUnitVec4(l0101);
+    vec4 l0110Hash = ihash4AsUnitVec4(l0110);
+    vec4 l0111Hash = ihash4AsUnitVec4(l0111);
+    vec4 l1000Hash = ihash4AsUnitVec4(l1000);
+    vec4 l1001Hash = ihash4AsUnitVec4(l1001);
+    vec4 l1010Hash = ihash4AsUnitVec4(l1010);
+    vec4 l1011Hash = ihash4AsUnitVec4(l1011);
+    vec4 l1100Hash = ihash4AsUnitVec4(l1100);
+    vec4 l1101Hash = ihash4AsUnitVec4(l1101);
+    vec4 l1110Hash = ihash4AsUnitVec4(l1110);
+    vec4 l1111Hash = ihash4AsUnitVec4(l1111);
+    // Vectors to V from each lattice point
+    vec4 v0000 = fract(v);
+    vec4 v0001 = vec4(v0000.x    , v0000.y    , v0000.z    , v0000.w - 1);
+    vec4 v0010 = vec4(v0000.x    , v0000.y    , v0000.z - 1, v0000.w    );
+    vec4 v0011 = vec4(v0000.x    , v0000.y    , v0000.z - 1, v0000.w - 1);
+    vec4 v0100 = vec4(v0000.x    , v0000.y - 1, v0000.z    , v0000.w    );
+    vec4 v0101 = vec4(v0000.x    , v0000.y - 1, v0000.z    , v0000.w - 1);
+    vec4 v0110 = vec4(v0000.x    , v0000.y - 1, v0000.z - 1, v0000.w    );
+    vec4 v0111 = vec4(v0000.x    , v0000.y - 1, v0000.z - 1, v0000.w - 1);
+    vec4 v1000 = vec4(v0000.x - 1, v0000.y    , v0000.z    , v0000.w    );
+    vec4 v1001 = vec4(v0000.x - 1, v0000.y    , v0000.z    , v0000.w - 1);
+    vec4 v1010 = vec4(v0000.x - 1, v0000.y    , v0000.z - 1, v0000.w    );
+    vec4 v1011 = vec4(v0000.x - 1, v0000.y    , v0000.z - 1, v0000.w - 1);
+    vec4 v1100 = vec4(v0000.x - 1, v0000.y - 1, v0000.z    , v0000.w    );
+    vec4 v1101 = vec4(v0000.x - 1, v0000.y - 1, v0000.z    , v0000.w - 1);
+    vec4 v1110 = vec4(v0000.x - 1, v0000.y - 1, v0000.z - 1, v0000.w    );
+    vec4 v1111 = vec4(v0000.x - 1, v0000.y - 1, v0000.z - 1, v0000.w - 1);
+    // Interpolation
+    vec4 t = v0000;
+    vec4 tMapped = quintic4(t);
+
+    return mix(
+        mix(
+            mix(
+                mix(
+                    dot(l0000Hash, v0000),
+                    dot(l0001Hash, v0001),
+                    tMapped.w
+                ),
+                mix(
+                    dot(l0010Hash, v0010),
+                    dot(l0011Hash, v0011),
+                    tMapped.w
+                ),
+                tMapped.z
+            ),
+            mix(
+                mix(
+                    dot(l0100Hash, v0100),
+                    dot(l0101Hash, v0101),
+                    tMapped.w
+                ),
+                mix(
+                    dot(l0110Hash, v0110),
+                    dot(l0111Hash, v0111),
+                    tMapped.w
+                ),
+                tMapped.z
+            ),
+            tMapped.y
+        ),
+        mix(
+            mix(
+                mix(
+                    dot(l1000Hash, v1000),
+                    dot(l1001Hash, v1001),
+                    tMapped.w
+                ),
+                mix(
+                    dot(l1010Hash, v1010),
+                    dot(l1011Hash, v1011),
+                    tMapped.w
+                ),
+                tMapped.z
+            ),
+            mix(
+                mix(
+                    dot(l1100Hash, v1100),
+                    dot(l1101Hash, v1101),
+                    tMapped.w
+                ),
+                mix(
+                    dot(l1110Hash, v1110),
+                    dot(l1111Hash, v1111),
+                    tMapped.w
+                ),
+                tMapped.z
+            ),
+            tMapped.y
+        ),
+        tMapped.x
+    );
+}
+
 float perlinNoiseUnsigned1(float x) { return (perlinNoiseSigned1(x) + 1.0) * 0.5; }
 float perlinNoiseUnsigned2(vec2 v)  { return (perlinNoiseSigned2(v) + 1.0) * 0.5; }
 float perlinNoiseUnsigned3(vec3 v)  { return (perlinNoiseSigned3(v) + 1.0) * 0.5; }
+float perlinNoiseUnsigned4(vec4 v)  { return (perlinNoiseSigned4(v) + 1.0) * 0.5; }
 
 /*
  * Implementations of fractal sums with the following parameters:
@@ -404,15 +1082,18 @@ float valueNoiseFractalUnsigned1(float x, float lacunarity, float gain, uint lay
 /*
  * Macros to compute fractal versions of noise functions with the following parameters:
  *
- * identAssignTo: The name of the variable of type `float` to assign the result to;
+ * tyAssignTo: The type representing the dimension of the noise function (typically `float`, but also `float, `vec2`, `vec3`, `vec4` for noise function derivatives)
+ * identAssignTo: The name of the variable of type `tyAssignTo` to assign the result to;
  * identNoiseFunction: The name of the base n-dimensional noise function;
  * exprV: The input vector;
  * exprLacunarity: The modifier to multiply `exprV` each iteration;
  * exprGain: The modifier to multiply `exprV` each iteration;
  * exprLayers: The number of layers of the noise to sum up;
  */
-#define FRACTALIFY(identAssignTo, identNoiseFunction, exprV, exprLacunarity, exprGain, exprLayers) do { \
-    float result = 0.0;                                                            \
+#define FRACTALIFY(tyAssignTo, identAssignTo, identNoiseFunction, exprV, exprLacunarity, exprGain, exprLayers) ;\
+tyAssignTo identAssignTo;                                                          \
+do {                                                                               \
+    tyAssignTo result = tyAssignTo(0.0);                                           \
     float inMultiplier = 1.0;                                                      \
     float outMultiplier = 1.0;                                                     \
     float range = 0.0;                                                             \
@@ -424,14 +1105,14 @@ float valueNoiseFractalUnsigned1(float x, float lacunarity, float gain, uint lay
         outMultiplier *= float(exprGain);                                          \
     }                                                                              \
                                                                                    \
-    float normalizedResult = result / range;                                       \
+    tyAssignTo normalizedResult = result / range;                                  \
     identAssignTo = normalizedResult;                                              \
 } while(false);
 
 // A version of `FRACTALIFY`, where `exprGain = 1 / exprLacunarity`
-#define FRACTALIFY_PINK(identAssignTo, identNoiseFunction, exprV, exprLacunarity, exprLayers) \
-    FRACTALIFY(identAssignTo, identNoiseFunction, exprV, exprLacunarity, (1.0 / exprLacunarity), exprLayers)
+#define FRACTALIFY_PINK(tyAssignTo, identAssignTo, identNoiseFunction, exprV, exprLacunarity, exprLayers) \
+    FRACTALIFY(tyAssignTo, identAssignTo, identNoiseFunction, exprV, exprLacunarity, (1.0 / exprLacunarity), exprLayers)
 
 // A version of `FRACTALIFY`, where `exprLacunarity = 2` and `exprGain = 0.5`
-#define FRACTALIFY_BROWN(identAssignTo, identNoiseFunction, exprV, exprLayers) \
-    FRACTALIFY_PINK(identAssignTo, identNoiseFunction, exprV, 2.0, exprLayers)
+#define FRACTALIFY_BROWN(tyAssignTo, identAssignTo, identNoiseFunction, exprV, exprLayers) \
+    FRACTALIFY_PINK(tyAssignTo, identAssignTo, identNoiseFunction, exprV, 2.0, exprLayers)
