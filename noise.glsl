@@ -1,6 +1,3 @@
-const float TAU = 6.28318530718;
-const float PI  = 3.14159265359;
-
 uint uhash1(uint x) {
     x += ( x << 10u );
     x ^= ( x >>  6u );
@@ -276,37 +273,6 @@ vec4 ihash4AsUnitVec4(ivec4 v) {
 float mixDerivativeT(float a, float b, float t) { return b - a; }
 float mixDerivativeA(float a, float b, float t) { return 1 - t; }
 float mixDerivativeB(float a, float b, float t) { return     t; }
-/* vec2  mixDerivativePartialT2(vec2  a, vec2  b, float t) { return vec2(b - a); } */
-/* vec2  mixDerivativePartialA2(vec2  a, vec2  b, float t) { return vec2(1 - t); } */
-/* vec2  mixDerivativePartialB2(vec2  a, vec2  b, float t) { return vec2(    t); } */
-/* vec3  mixDerivativePartialT3(vec3  a, vec3  b, float t) { return vec3(b - a); } */
-/* vec3  mixDerivativePartialA3(vec3  a, vec3  b, float t) { return vec3(1 - t); } */
-/* vec3  mixDerivativePartialB3(vec3  a, vec3  b, float t) { return vec3(    t); } */
-/* vec4  mixDerivativePartialT4(vec4  a, vec4  b, float t) { return vec4(b - a); } */
-/* vec4  mixDerivativePartialA4(vec4  a, vec4  b, float t) { return vec4(1 - t); } */
-/* vec4  mixDerivativePartialB4(vec4  a, vec4  b, float t) { return vec4(    t); } */
-
-float smoothStep1(float t) { return t * t * (3 - 2 * t); }
-vec2  smoothStep2(vec2 t)  { return t * t * (3 - 2 * t); }
-vec3  smoothStep3(vec3 t)  { return t * t * (3 - 2 * t); }
-vec4  smoothStep4(vec4 t)  { return t * t * (3 - 2 * t); }
-
-/*
- * Derivation:
- * smoothStep(t) = t * t * (3 - 2 * t)
- * smoothStep(t) = 3t^2 - 2t^3
- * smoothStep'(t) = 6t - 6t^2
- * smoothStep'(t) = 6t * (1 - t)
- */
-float smoothStepDerivative1(float t) { return 6 * t * (1 - t); }
-vec2  smoothStepDerivative2(vec2 t)  { return 6 * t * (1 - t); }
-vec3  smoothStepDerivative3(vec3 t)  { return 6 * t * (1 - t); }
-vec4  smoothStepDerivative4(vec4 t)  { return 6 * t * (1 - t); }
-
-float quintic1(float t) { return t * t * t * (t * (t * 6 - 15) + 10); }
-vec2  quintic2(vec2  t) { return t * t * t * (t * (t * 6 - 15) + 10); }
-vec3  quintic3(vec3  t) { return t * t * t * (t * (t * 6 - 15) + 10); }
-vec4  quintic4(vec4  t) { return t * t * t * (t * (t * 6 - 15) + 10); }
 
 // Value noise assigns random values to lattice points and interpolates between them
 float valueNoiseUnsigned1(float x) {
@@ -318,7 +284,7 @@ float valueNoiseUnsigned1(float x) {
     float l1Hash = ihash1AsUnsignedFloat(l1);
     // Interpolation
     float t = fract(x);
-    float tMapped = smoothStep1(t);
+    float tMapped = noiseInterpolation(t);
 
     return mix(l0Hash, l1Hash, tMapped);
 }
@@ -354,8 +320,8 @@ float valueNoiseUnsignedGradient1(float x) {
     float l1Hash = ihash1AsUnsignedFloat(l1);
     // Interpolation
     float t = fract(x);
-    float tMapped = smoothStep1(t);
-    float tMappedDerivative = smoothStepDerivative1(t);
+    float tMapped = noiseInterpolation(t);
+    float tMappedDerivative = noiseInterpolationGradient(t);
 
     /*
      * z = dmix(a, b, t2)
@@ -383,7 +349,7 @@ float valueNoiseUnsigned2(vec2 v) {
     float l11Hash = ihash2AsUnsignedFloat(l11);
     // Interpolation
     vec2 t = fract(v);
-    vec2 tMapped = smoothStep2(t);
+    vec2 tMapped = noiseInterpolation(t);
 
     return mix(
         mix(l00Hash, l01Hash, tMapped.y),
@@ -405,8 +371,8 @@ vec2 valueNoiseUnsignedGradient2(vec2 v) {
     float l11Hash = ihash2AsUnsignedFloat(l11);
     // Interpolation
     vec2 t = fract(v);
-    vec2 tMapped = smoothStep2(t);
-    vec2 tMappedDerivative = smoothStepDerivative2(t);
+    vec2 tMapped = noiseInterpolation(t);
+    vec2 tMappedDerivative = noiseInterpolationGradient(t);
 
     /*
      * Differentiate with respect to t.x and t.y:
@@ -443,6 +409,7 @@ vec2 valueNoiseUnsignedGradient2(vec2 v) {
      * dt/dty = d(smoothStep(t).x)/dty (= 0)
      */
 
+    /* Direct rewrite without the usage of temporary variables:
     return vec2(
         mixDerivativeT(
             mix(l00Hash, l01Hash, tMapped.y),
@@ -460,6 +427,40 @@ vec2 valueNoiseUnsignedGradient2(vec2 v) {
             mix(l10Hash, l11Hash, tMapped.y),
             tMapped.x
         ) * mixDerivativeT(l10Hash, l11Hash, tMapped.y) * tMappedDerivative.y
+    );
+    */
+
+    float mixl0_Hash = mix(l00Hash, l01Hash, tMapped.y);
+    float mixl1_Hash = mix(l10Hash, l11Hash, tMapped.y);
+
+    return vec2(
+        // dz/dtx
+        mixDerivativeT(
+            mixl0_Hash,
+            mixl1_Hash,
+            tMapped.x
+        ) * tMappedDerivative.x,
+
+        // dz/dty
+        (
+            mixDerivativeA(
+                mixl0_Hash,
+                mixl1_Hash,
+                tMapped.x
+            ) * mixDerivativeT(
+                l00Hash,
+                l01Hash,
+                tMapped.y
+            ) + mixDerivativeB(
+                mixl0_Hash,
+                mixl1_Hash,
+                tMapped.x
+            ) * mixDerivativeT(
+                l10Hash,
+                l11Hash,
+                tMapped.y
+            )
+        ) * tMappedDerivative.y
     );
 }
 
@@ -484,7 +485,7 @@ float valueNoiseUnsigned3(vec3 v) {
     float l111Hash = ihash3AsUnsignedFloat(l111);
     // Interpolation
     vec3 t = fract(v);
-    vec3 tMapped = smoothStep3(t);
+    vec3 tMapped = noiseInterpolation(t);
 
     return mix(
         mix(
@@ -522,8 +523,8 @@ vec3 valueNoiseUnsignedGradient3(vec3 v) {
     float l111Hash = ihash3AsUnsignedFloat(l111);
     // Interpolation
     vec3 t = fract(v);
-    vec3 tMapped = smoothStep3(t);
-    vec3 tMappedDerivative = smoothStepDerivative3(t);
+    vec3 tMapped = noiseInterpolation(t);
+    vec3 tMappedDerivative = noiseInterpolationGradient(t);
 
     /*
      * Differentiate with respect to t.x, t.y and t.z:
@@ -617,6 +618,7 @@ vec3 valueNoiseUnsignedGradient3(vec3 v) {
      *         + (dmix(mix(l100, l101, smoothStep(t).z), mix(l110, l111, smoothStep(t).z), smoothStep(t).y)/dbi) * (dmix(l110, l111, smoothStep(t).z)/dtii) * (d(smoothStep(t).z)/dtz)))
      */
 
+    /* Direct rewrite without the usage of temporary variables:
     return vec3(
         // dz/dtx
         mixDerivativeT(
@@ -670,12 +672,111 @@ vec3 valueNoiseUnsignedGradient3(vec3 v) {
         ) * tMappedDerivative.y,
 
         // dz/dtz
-           mixDerivativeA(mix(mix(l000Hash, l001Hash, tMapped.z), mix(l010Hash, l011Hash, tMapped.z), tMapped.y), mix(mix(l100Hash, l101Hash, tMapped.z), mix(l110Hash, l111Hash, tMapped.z), tMapped.y), tMapped.x)
-           * (mixDerivativeA(mix(l000Hash, l001Hash, tMapped.z), mix(l010Hash, l011Hash, tMapped.z), tMapped.y) * mixDerivativeT(l000Hash, l001Hash, tMapped.z) * tMappedDerivative.z
-              + mixDerivativeB(mix(l000Hash, l001Hash, tMapped.z), mix(l010Hash, l011Hash, tMapped.z), tMapped.y) * mixDerivativeT(l010Hash, l011Hash, tMapped.z) * tMappedDerivative.z)
-         + mixDerivativeB(mix(mix(l000Hash, l001Hash, tMapped.z), mix(l010Hash, l011Hash, tMapped.z), tMapped.y), mix(mix(l100Hash, l101Hash, tMapped.z), mix(l110Hash, l111Hash, tMapped.z), tMapped.y), tMapped.x)
-            * (mixDerivativeA(mix(l100Hash, l101Hash, tMapped.z), mix(l110Hash, l111Hash, tMapped.z), tMapped.y) * mixDerivativeT(l100Hash, l101Hash, tMapped.z) * tMappedDerivative.z
-               + mixDerivativeB(mix(l100Hash, l101Hash, tMapped.z), mix(l110Hash, l111Hash, tMapped.z), tMapped.y) * mixDerivativeT(l110Hash, l111Hash, tMapped.z) * tMappedDerivative.z)
+        mixDerivativeA(
+            mix(
+                mix(l000Hash, l001Hash, tMapped.z),
+                mix(l010Hash, l011Hash, tMapped.z),
+                tMapped.y
+            ),
+            mix(
+                mix(l100Hash, l101Hash, tMapped.z),
+                mix(l110Hash, l111Hash, tMapped.z),
+                tMapped.y
+            ),
+            tMapped.x
+        ) * (
+            mixDerivativeA(
+                mix(l000Hash, l001Hash, tMapped.z),
+                mix(l010Hash, l011Hash, tMapped.z),
+                tMapped.y
+            ) * mixDerivativeT(l000Hash, l001Hash, tMapped.z) * tMappedDerivative.z
+            + mixDerivativeB(
+                mix(l000Hash, l001Hash, tMapped.z),
+                mix(l010Hash, l011Hash, tMapped.z),
+                tMapped.y
+            ) * mixDerivativeT(l010Hash, l011Hash, tMapped.z) * tMappedDerivative.z
+        ) + mixDerivativeB(
+            mix(
+                mix(l000Hash, l001Hash, tMapped.z),
+                mix(l010Hash, l011Hash, tMapped.z),
+                tMapped.y
+            ),
+            mix(
+                mix(l100Hash, l101Hash, tMapped.z),
+                mix(l110Hash, l111Hash, tMapped.z),
+                tMapped.y
+            ),
+            tMapped.x
+        ) * (
+            mixDerivativeA(
+                mix(l100Hash, l101Hash, tMapped.z),
+                mix(l110Hash, l111Hash, tMapped.z),
+                tMapped.y
+            ) * mixDerivativeT(l100Hash, l101Hash, tMapped.z) * tMappedDerivative.z
+            + mixDerivativeB(
+                mix(l100Hash, l101Hash, tMapped.z),
+                mix(l110Hash, l111Hash, tMapped.z),
+                tMapped.y
+            ) * mixDerivativeT(l110Hash, l111Hash, tMapped.z) * tMappedDerivative.z
+        )
+    */
+
+    float mixl00XHash = mix(l000Hash, l001Hash, tMapped.z);
+    float mixl01XHash = mix(l010Hash, l011Hash, tMapped.z);
+    float mixl10XHash = mix(l100Hash, l101Hash, tMapped.z);
+    float mixl11XHash = mix(l110Hash, l111Hash, tMapped.z);
+    float mixl0XXHash = mix(mixl00XHash, mixl01XHash, tMapped.y);
+    float mixl1XXHash = mix(mixl10XHash, mixl11XHash, tMapped.y);
+    float mixDerivativeAlXXXHash = mixDerivativeA(mixl0XXHash, mixl1XXHash, tMapped.x);
+    float mixDerivativeBlXXXHash = mixDerivativeB(mixl0XXHash, mixl1XXHash, tMapped.x);
+
+    return vec3(
+        // dz/dtx
+        mixDerivativeT(
+            mixl0XXHash,
+            mixl1XXHash,
+            tMapped.x
+        ) * tMappedDerivative.x,
+
+        // dz/dty
+        (
+            mixDerivativeAlXXXHash * mixDerivativeT(
+                mixl00XHash,
+                mixl01XHash,
+                tMapped.y
+            ) + mixDerivativeBlXXXHash * mixDerivativeT(
+                mixl10XHash,
+                mixl11XHash,
+                tMapped.y
+            )
+        ) * tMappedDerivative.y,
+
+        // dz/dtz
+        (
+            mixDerivativeAlXXXHash * (
+                mixDerivativeA(
+                    mixl00XHash,
+                    mixl01XHash,
+                    tMapped.y
+                ) * mixDerivativeT(l000Hash, l001Hash, tMapped.z)
+                + mixDerivativeB(
+                    mixl00XHash,
+                    mixl01XHash,
+                    tMapped.y
+                ) * mixDerivativeT(l010Hash, l011Hash, tMapped.z)
+            ) + mixDerivativeBlXXXHash * (
+                mixDerivativeA(
+                    mixl10XHash,
+                    mixl11XHash,
+                    tMapped.y
+                ) * mixDerivativeT(l100Hash, l101Hash, tMapped.z)
+                + mixDerivativeB(
+                    mixl10XHash,
+                    mixl11XHash,
+                    tMapped.y
+                ) * mixDerivativeT(l110Hash, l111Hash, tMapped.z)
+            )
+        ) * tMappedDerivative.z
     );
 
     /* return vec2( */
@@ -773,7 +874,7 @@ float valueNoiseUnsigned4(vec4 v) {
     float l1111Hash = ihash4AsUnsignedFloat(l1111);
     // Interpolation
     vec4 t = fract(v);
-    vec4 tMapped = smoothStep4(t);
+    vec4 tMapped = noiseInterpolation(t);
 
     return mix(
         mix(
@@ -806,6 +907,133 @@ float valueNoiseUnsigned4(vec4 v) {
     );
 }
 
+vec4 valueNoiseUnsignedGradient4(vec4 v) {
+    // Lattice point integer coordinates
+    ivec4 l0000 = ivec4(floor(v));
+    ivec4 l0001 = l0000 + ivec4(0, 0, 0, 1);
+    ivec4 l0010 = l0000 + ivec4(0, 0, 1, 0);
+    ivec4 l0011 = l0000 + ivec4(0, 0, 1, 1);
+    ivec4 l0100 = l0000 + ivec4(0, 1, 0, 0);
+    ivec4 l0101 = l0000 + ivec4(0, 1, 0, 1);
+    ivec4 l0110 = l0000 + ivec4(0, 1, 1, 0);
+    ivec4 l0111 = l0000 + ivec4(0, 1, 1, 1);
+    ivec4 l1000 = l0000 + ivec4(1, 0, 0, 0);
+    ivec4 l1001 = l0000 + ivec4(1, 0, 0, 1);
+    ivec4 l1010 = l0000 + ivec4(1, 0, 1, 0);
+    ivec4 l1011 = l0000 + ivec4(1, 0, 1, 1);
+    ivec4 l1100 = l0000 + ivec4(1, 1, 0, 0);
+    ivec4 l1101 = l0000 + ivec4(1, 1, 0, 1);
+    ivec4 l1110 = l0000 + ivec4(1, 1, 1, 0);
+    ivec4 l1111 = l0000 + ivec4(1, 1, 1, 1);
+    // Deterministically random values for lattice points
+    float l0000Hash = ihash4AsUnsignedFloat(l0000);
+    float l0001Hash = ihash4AsUnsignedFloat(l0001);
+    float l0010Hash = ihash4AsUnsignedFloat(l0010);
+    float l0011Hash = ihash4AsUnsignedFloat(l0011);
+    float l0100Hash = ihash4AsUnsignedFloat(l0100);
+    float l0101Hash = ihash4AsUnsignedFloat(l0101);
+    float l0110Hash = ihash4AsUnsignedFloat(l0110);
+    float l0111Hash = ihash4AsUnsignedFloat(l0111);
+    float l1000Hash = ihash4AsUnsignedFloat(l1000);
+    float l1001Hash = ihash4AsUnsignedFloat(l1001);
+    float l1010Hash = ihash4AsUnsignedFloat(l1010);
+    float l1011Hash = ihash4AsUnsignedFloat(l1011);
+    float l1100Hash = ihash4AsUnsignedFloat(l1100);
+    float l1101Hash = ihash4AsUnsignedFloat(l1101);
+    float l1110Hash = ihash4AsUnsignedFloat(l1110);
+    float l1111Hash = ihash4AsUnsignedFloat(l1111);
+    // Interpolation
+    vec4 t = fract(v);
+    vec4 tMapped = noiseInterpolation(t);
+    vec4 tMappedDerivative = noiseInterpolationGradient(t);
+
+    float mixl000XHash = mix(l0000Hash, l0001Hash, tMapped.w);
+    float mixl001XHash = mix(l0010Hash, l0011Hash, tMapped.w);
+    float mixl010XHash = mix(l0100Hash, l0101Hash, tMapped.w);
+    float mixl011XHash = mix(l0110Hash, l0111Hash, tMapped.w);
+    float mixl100XHash = mix(l1000Hash, l1001Hash, tMapped.w);
+    float mixl101XHash = mix(l1010Hash, l1011Hash, tMapped.w);
+    float mixl110XHash = mix(l1100Hash, l1101Hash, tMapped.w);
+    float mixl111XHash = mix(l1110Hash, l1111Hash, tMapped.w);
+    float mixl00XXHash = mix(mixl000XHash, mixl001XHash, tMapped.z);
+    float mixl01XXHash = mix(mixl010XHash, mixl011XHash, tMapped.z);
+    float mixl10XXHash = mix(mixl100XHash, mixl101XHash, tMapped.z);
+    float mixl11XXHash = mix(mixl110XHash, mixl111XHash, tMapped.z);
+    float mixl0XXXHash = mix(mixl00XXHash, mixl01XXHash, tMapped.y);
+    float mixl1XXXHash = mix(mixl10XXHash, mixl11XXHash, tMapped.y);
+    float mixDerivativeAl0XXXHash = mixDerivativeA(mixl00XXHash, mixl01XXHash, tMapped.y);
+    float mixDerivativeAl1XXXHash = mixDerivativeA(mixl10XXHash, mixl11XXHash, tMapped.y);
+    float mixDerivativeBl0XXXHash = mixDerivativeB(mixl00XXHash, mixl01XXHash, tMapped.y);
+    float mixDerivativeBl1XXXHash = mixDerivativeB(mixl10XXHash, mixl11XXHash, tMapped.y);
+    float mixDerivativeAlXXXXHash = mixDerivativeA(mixl0XXXHash, mixl1XXXHash, tMapped.x);
+    float mixDerivativeBlXXXXHash = mixDerivativeB(mixl0XXXHash, mixl1XXXHash, tMapped.x);
+
+    // Pattern-extended to 4th dimension, without proof
+
+    return vec4(
+        // dz/dtx
+        mixDerivativeT(
+            mixl0XXXHash,
+            mixl1XXXHash,
+            tMapped.x
+        ) * tMappedDerivative.x,
+
+        // dz/dty
+        (
+            mixDerivativeAlXXXXHash
+            * mixDerivativeT(mixl00XXHash, mixl01XXHash, tMapped.y)
+            + mixDerivativeBlXXXXHash
+            * mixDerivativeT(mixl10XXHash, mixl11XXHash, tMapped.y)
+        ) * tMappedDerivative.y,
+
+        // dz/dtz
+        (
+            mixDerivativeAlXXXXHash * (
+                  mixDerivativeAl0XXXHash
+                * mixDerivativeT(mixl000XHash, mixl001XHash, tMapped.z)
+                + mixDerivativeBl0XXXHash
+                * mixDerivativeT(mixl010XHash, mixl011XHash, tMapped.z)
+            ) + mixDerivativeBlXXXXHash * (
+                  mixDerivativeAl1XXXHash
+                * mixDerivativeT(mixl100XHash, mixl101XHash, tMapped.z)
+                + mixDerivativeBl1XXXHash
+                * mixDerivativeT(mixl110XHash, mixl111XHash, tMapped.z)
+            )
+        ) * tMappedDerivative.z,
+
+        // dz/dtw
+        (
+            mixDerivativeAlXXXXHash * (
+                mixDerivativeAl0XXXHash * (
+                      mixDerivativeA(mixl000XHash, mixl001XHash, tMapped.z)
+                    * mixDerivativeT(   l0000Hash,    l0001Hash, tMapped.w)
+                    + mixDerivativeB(mixl000XHash, mixl001XHash, tMapped.z)
+                    * mixDerivativeT(   l0010Hash,    l0011Hash, tMapped.w)
+                )
+                + mixDerivativeBl0XXXHash * (
+                      mixDerivativeA(mixl010XHash, mixl011XHash, tMapped.z)
+                    * mixDerivativeT(   l0100Hash,    l0101Hash, tMapped.w)
+                    + mixDerivativeB(mixl010XHash, mixl011XHash, tMapped.z)
+                    * mixDerivativeT(   l0110Hash,    l0111Hash, tMapped.w)
+                )
+            ) + mixDerivativeBlXXXXHash * (
+                mixDerivativeAl1XXXHash * (
+                      mixDerivativeA(mixl100XHash, mixl101XHash, tMapped.z)
+                    * mixDerivativeT(   l1000Hash,    l1001Hash, tMapped.w)
+                    + mixDerivativeB(mixl100XHash, mixl101XHash, tMapped.z)
+                    * mixDerivativeT(   l1010Hash,    l1011Hash, tMapped.w)
+                )
+                + mixDerivativeBl1XXXHash * (
+                      mixDerivativeA(mixl110XHash, mixl111XHash, tMapped.z)
+                    * mixDerivativeT(   l1100Hash,    l1101Hash, tMapped.w)
+                    + mixDerivativeB(mixl110XHash, mixl111XHash, tMapped.z)
+                    * mixDerivativeT(   l1110Hash,    l1111Hash, tMapped.w)
+                )
+            )
+        ) * tMappedDerivative.w
+    );
+}
+
 float valueNoiseSigned1(float x) { return valueNoiseUnsigned1(x) * 2.0 - 1.0; }
 float valueNoiseSigned2(vec2 v)  { return valueNoiseUnsigned2(v) * 2.0 - 1.0; }
 float valueNoiseSigned3(vec3 v)  { return valueNoiseUnsigned3(v) * 2.0 - 1.0; }
@@ -813,7 +1041,7 @@ float valueNoiseSigned4(vec4 v)  { return valueNoiseUnsigned4(v) * 2.0 - 1.0; }
 float valueNoiseSignedGradient1(float x) { return valueNoiseUnsignedGradient1(x) * 2.0; }
 vec2  valueNoiseSignedGradient2(vec2 v)  { return valueNoiseUnsignedGradient2(v) * 2.0; }
 vec3  valueNoiseSignedGradient3(vec3 v)  { return valueNoiseUnsignedGradient3(v) * 2.0; }
-/* vec4  valueNoiseSignedGradient4(vec4 v)  { return valueNoiseUnsignedGradient4(v) * 2.0; } */
+vec4  valueNoiseSignedGradient4(vec4 v)  { return valueNoiseUnsignedGradient4(v) * 2.0; }
 
 float perlinNoiseSigned1(float x) {
     // Lattice point integer coordinates
@@ -827,7 +1055,7 @@ float perlinNoiseSigned1(float x) {
     float v1 = float(v0 - 1);
     // Interpolation
     float t = v0;
-    float tMapped = smoothStep1(t);
+    float tMapped = noiseInterpolation(t);
 
     return mix(dot(l0Hash, v0), dot(l1Hash, v1), tMapped);
 }
@@ -850,7 +1078,7 @@ float perlinNoiseSigned2(vec2 v) {
     vec2 v11 = vec2(v00.x - 1, v00.y - 1);
     // Interpolation
     vec2 t = v00;
-    vec2 tMapped = quintic2(t);
+    vec2 tMapped = noiseInterpolation(t);
 
     return mix(
         mix(
@@ -897,7 +1125,7 @@ float perlinNoiseSigned3(vec3 v) {
     vec3 v111 = vec3(v000.x - 1, v000.y - 1, v000.z - 1);
     // Interpolation
     vec3 t = v000;
-    vec3 tMapped = quintic3(t);
+    vec3 tMapped = noiseInterpolation(t);
 
     return mix(
         mix(
@@ -984,7 +1212,7 @@ float perlinNoiseSigned4(vec4 v) {
     vec4 v1111 = vec4(v0000.x - 1, v0000.y - 1, v0000.z - 1, v0000.w - 1);
     // Interpolation
     vec4 t = v0000;
-    vec4 tMapped = quintic4(t);
+    vec4 tMapped = noiseInterpolation(t);
 
     return mix(
         mix(
