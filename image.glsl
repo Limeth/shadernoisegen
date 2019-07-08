@@ -12,29 +12,37 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
 
   /* float value; FRACTALIFY_BROWN(value, valueNoiseUnsigned4, vec4(uv * 10, iTime * 0.2, 0), 10) */
   /* float value; FRACTALIFY_BROWN(value, perlinNoiseUnsigned4, vec4(uv * 10, iTime * 1.0, (uv.x + uv.y) * 0.0), 10) */
-  uint layers = 16;
-  vec3 arg = vec3(uv * 10, iTime * 0.5);
+  uint layers = 1;
+  /* float arg = u * 20 + 20; */
+  /* vec2 arg = vec2(0, u * 10); */
+  /* vec2 arg = uv * 10; */
+  vec4 arg = vec4(uv * 10, iTime * 0.2, 0).zwxy;
   /* vec3 arg = vec3(u + iTime * 0.2, 0, 0); */
   const float GOLDEN_RATIO = 1.6180339887498948482;
-  vec3 lacunarity = vec3(GOLDEN_RATIO);
-
-  vec3 gain = 1.0 / lacunarity;
+  float lacunarity = float(GOLDEN_RATIO);
+  float gain = 1.0 / lacunarity;
   /* float value = valueNoiseUnsigned3(arg); */
-  float value;
-  vec3 grad;
+  /* FRACTALIFY(float, float, value, perlinNoiseUnsigned1, arg, lacunarity, gain, layers); */
+  /* FRACTALIFY(float, float, grad, perlinNoiseUnsignedGradient1, arg, lacunarity, gain, layers); */
+  /* FRACTALIFY(float, float, value, valueNoiseUnsigned1, arg, lacunarity, gain, layers); */
+  /* FRACTALIFY(float, float, grad, valueNoiseUnsignedGradient1, arg, lacunarity, gain, layers); */
+  FRACTALIFY(float, vec4, value, perlinNoiseUnsigned4, arg, lacunarity, gain, layers);
+  FRACTALIFY(vec4, vec4, grad, perlinNoiseUnsignedGradient4, arg, lacunarity, gain, layers);
+  /* FRACTALIFY(float, vec2, value, valueNoiseUnsigned2, arg, lacunarity, gain, layers); */
+  /* FRACTALIFY(vec2, vec2, grad, valueNoiseUnsignedGradient2, arg, lacunarity, gain, layers); */
 
-  if (fragCoord.x / iResolution.x > 1.0) {
-      FRACTALIFY(float, vec3, valuePerlin, perlinNoiseUnsigned3, arg, lacunarity, gain, layers);
-      /* FRACTALIFY(vec3, vec3, gradPerlin, perlinNoiseUnsignedGradient3, arg, lacunarity, gain, layers); */
-      value = valuePerlin;
-      grad = vec3(0);
-
-  } else {
-      FRACTALIFY(float, vec3, valueValue,  valueNoiseUnsigned3, arg, lacunarity, gain, layers);
-      FRACTALIFY(vec3, vec3, gradValue, valueNoiseUnsignedGradient3, arg, lacunarity, gain, layers);
-      value = valueValue;
-      grad = gradValue;
-  }
+  vec2 lowResCoord = floor(fragCoord / 4);
+  grad.xyzw = grad.zwxy;
+  grad.x = mod(lowResCoord.x + lowResCoord.y, 4) == 0 ? abs(grad.x) : grad.x;
+  grad.y = mod(lowResCoord.x + lowResCoord.y + 2, 4) == 0 ? abs(grad.y) : grad.y;
+  float y = (fragCoord / iResolution.xy).y;
+  float lineThickness = 0.01;
+  grad *= (sin(iTime) / 2 + 0.5);
+  fragColor.rgb = vec3(value);
+  fragColor.rg += grad.xy;
+  /* fragColor.rgb = (1 - vec3(step(value, y))) / 2.0; */
+  /* fragColor.r += (abs(grad.y - y + 0.5) < lineThickness / 2.0) ? 1 : 0; */
+  /* fragColor.rgb += vec3(abs(y - 0.5) < lineThickness / 12.0) / 2; */
 
   /* vec3 grad = valueNoiseUnsignedGradient3(arg); */
   /* FRACTALIFY(vec3, vec3, grad, valueNoiseUnsignedGradient3, arg, lacunarity, gain, layers); */
@@ -61,20 +69,20 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
   /* color.rgb += vec3(grad.z) * 2.0; */
   /* color.rgb += vec3(grad.w) * 2.0; */
 
-  vec2 texCoord = fragCoord / iResolution.xy;
-  texCoord += grad.xy * 0.025;
+  /* vec2 texCoord = fragCoord / iResolution.xy; */
+  /* texCoord += grad.xy * 0.025; */
 
   /* color.rgb = grad; */
 
 
   // Output to screen
   /* if (mod((fragCoord.x + fragCoord.y) / 2, 2) != 0) { */
-      fragColor = texture(background, texCoord);
+      /* fragColor = texture(background, texCoord); */
   /* } else { */
       /* fragColor += color * 1; */
   /* } */
 
-  /* fragColor.rgb = vec3(step(value, (fragCoord / iResolution.xy).y)); */
+  /* fragColor.r += 0.5 - step(grad + 0.5, y) / 2.0; */
 }
 
 out vec4 fragColor;

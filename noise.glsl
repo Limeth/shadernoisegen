@@ -1060,6 +1060,58 @@ float perlinNoiseSigned1(float x) {
     return mix(dot(l0Hash, v0), dot(l1Hash, v1), tMapped);
 }
 
+float perlinNoiseSignedGradient1(float x) {
+    // Lattice point integer coordinates
+    int l0 = int(floor(x));
+    int l1 = l0 + 1;
+    // Deterministically random values for lattice points
+    float l0Hash = ihash1AsUnitVec1(l0);
+    float l1Hash = ihash1AsUnitVec1(l1);
+    // Vectors to X from each lattice point
+    float v0 = fract(x);
+    float v1 = float(v0 - 1);
+    // Interpolation
+    float t = v0;
+    float tMapped = noiseInterpolation(t);
+    float tMappedDerivative = noiseInterpolationGradient(t);
+
+    /*
+        f(t) = mix(dot(l0Hash, v0), dot(l1Hash, v1), noiseInterpolation(t))
+        df(t)/dt = dmix(dot(l0Hash, v0), dot(l1Hash, v1), noiseInterpolation(t))/dt
+            = (dmix(dot(l0Hash, v0), dot(l1Hash, v1), noiseInterpolation(t))/da) * (da/dt)
+            + (dmix(dot(l0Hash, v0), dot(l1Hash, v1), noiseInterpolation(t))/db) * (db/dt)
+            + (dmix(dot(l0Hash, v0), dot(l1Hash, v1), noiseInterpolation(t))/dt2) * (dt2/dt)
+        where
+          dot(x, y) = x * y
+          ddot(x, y)/dx = d(x * y)/dx = y
+          ddot(x, y)/dy = d(x * y)/dy = x
+          da/dt  = ddot(l0Hash, v0)/dt = ddot(l0Hash,     t)/dt
+                 = (ddot(l0Hash,     t)/dx) * (dx/dt) (= 0)
+                 + (ddot(l0Hash,     t)/dy) * (dy/dt)
+          where
+              dx/dt = dl0Hash/dt = 0
+              dy/dt = dt/dt = 1
+          therefore
+              da/dt = (ddot(l0Hash,     t)/dy) * 1 = l0Hash
+          db/dt  = ddot(l1Hash, v1)/dt = ddot(l1Hash, 1 - t)/dt
+                 = (ddot(l1Hash, 1 - t)/dx) * (dx/dt) (= 0)
+                 + (ddot(l1Hash, 1 - t)/dy) * (dy/dt)
+          where
+              dx/dt = dl1Hash/dt = 0
+              dy/dt = d(1 - t)/dt = -1
+          therefore
+              db/dt = (ddot(l1Hash, 1 - t)/dy) * (-1) = -l1Hash
+          dt2/dt = dnoiseInterpolation(t)/dt = noiseInterpolationGradient(t)
+     */
+
+    float dot0 = dot(l0Hash, v0);
+    float dot1 = dot(l1Hash, v1);
+
+    return mixDerivativeA(dot0, dot1, tMapped) * l0Hash
+         + mixDerivativeB(dot0, dot1, tMapped) * l1Hash
+         + mixDerivativeT(dot0, dot1, tMapped) * tMappedDerivative;
+}
+
 float perlinNoiseSigned2(vec2 v) {
     // Lattice point integer coordinates
     ivec2 l00 = ivec2(floor(v));
@@ -1092,6 +1144,128 @@ float perlinNoiseSigned2(vec2 v) {
             tMapped.y
         ),
         tMapped.x
+    );
+}
+
+vec2 perlinNoiseSignedGradient2(vec2 v) {
+    // Lattice point integer coordinates
+    ivec2 l00 = ivec2(floor(v));
+    ivec2 l01 = l00 + ivec2(0, 1);
+    ivec2 l10 = l00 + ivec2(1, 0);
+    ivec2 l11 = l00 + ivec2(1, 1);
+    // Deterministically random values for lattice points
+    vec2 l00Hash = ihash2AsUnitVec2(l00);
+    vec2 l01Hash = ihash2AsUnitVec2(l01);
+    vec2 l10Hash = ihash2AsUnitVec2(l10);
+    vec2 l11Hash = ihash2AsUnitVec2(l11);
+    // Vectors to V from each lattice point
+    vec2 v00 = fract(v);
+    vec2 v01 = vec2(v00.x    , v00.y - 1);
+    vec2 v10 = vec2(v00.x - 1, v00.y    );
+    vec2 v11 = vec2(v00.x - 1, v00.y - 1);
+    // Interpolation
+    vec2 t = v00;
+    vec2 tMapped = noiseInterpolation(t);
+    vec2 tMappedDerivative = noiseInterpolationGradient(t);
+
+    /*
+    f(t) = mix(mix(dot(l00Hash, v00), dot(l01Hash, v01), interp(ty)), mix(dot(l10Hash, v10), dot(l11Hash, v11), interp(ty)), interp(tx))
+    df(t)/dtx = dmix(mix(dot(l00Hash, v00), dot(l01Hash, v01), interp(ty)), mix(dot(l10Hash, v10), dot(l11Hash, v11), interp(ty)), interp(tx))/dtx
+    df(t)/dtx = (dmix(mix(dot(l00Hash, v00), dot(l01Hash, v01), interp(ty)), mix(dot(l10Hash, v10), dot(l11Hash, v11), interp(ty)), interp(tx))/da) * (da/dtx)
+              + (dmix(mix(dot(l00Hash, v00), dot(l01Hash, v01), interp(ty)), mix(dot(l10Hash, v10), dot(l11Hash, v11), interp(ty)), interp(tx))/db) * (db/dtx)
+              + (dmix(mix(dot(l00Hash, v00), dot(l01Hash, v01), interp(ty)), mix(dot(l10Hash, v10), dot(l11Hash, v11), interp(ty)), interp(tx))/dt2) * (dt2/dtx)
+    where
+        da/dtx  = dmix(dot(l00Hash, v00), dot(l01Hash, v01), interp(ty))/dtx
+                = (dmix(dot(l00Hash, v00), dot(l01Hash, v01), interp(ty))/dai) * (dai/dtx)
+                + (dmix(dot(l00Hash, v00), dot(l01Hash, v01), interp(ty))/dbi) * (dbi/dtx)
+                + (dmix(dot(l00Hash, v00), dot(l01Hash, v01), interp(ty))/dti) * (dti/dtx)
+        where
+            dot(i, j) = ix * jx + iy * jy
+            ddot(i, j)/dix = d(ix * jx + iy * jy)/dix = jx
+            dai/dtx = ddot(l00Hash, v00)/dtx = ddot(l00Hash, tx)/dtx = l00Hash.x
+            dbi/dtx = ddot(l01Hash, v01)/dtx = ddot(l01Hash, tx)/dtx = l01Hash.x
+            dti/dtx = dinterp(ty)/dtx = 0
+        therefore
+            da/dtx = (dmix(dot(l00Hash, v00), dot(l01Hash, v01), interp(ty))/dai) * l00Hash.x
+                   + (dmix(dot(l00Hash, v00), dot(l01Hash, v01), interp(ty))/dbi) * l01Hash.x
+        db/dtx = (dmix(dot(l10Hash, v10), dot(l11Hash, v11), interp(ty))/dai) * (-l10Hash.x)
+               + (dmix(dot(l10Hash, v10), dot(l11Hash, v11), interp(ty))/dbi) * (-l11Hash.x)
+        dt2/dtx = dinterp(tx)/dtx
+    therefore
+        df(t)/dtx = (dmix(mix(dot(l00Hash, v00), dot(l01Hash, v01), interp(ty)), mix(dot(l10Hash, v10), dot(l11Hash, v11), interp(ty)), interp(tx))/da) * (
+              (dmix(dot(l00Hash, v00), dot(l01Hash, v01), interp(ty))/dai) * l00Hash.x
+            + (dmix(dot(l00Hash, v00), dot(l01Hash, v01), interp(ty))/dbi) * l01Hash.x
+        ) + (dmix(mix(dot(l00Hash, v00), dot(l01Hash, v01), interp(ty)), mix(dot(l10Hash, v10), dot(l11Hash, v11), interp(ty)), interp(tx))/db) * (
+              (dmix(dot(l10Hash, v10), dot(l11Hash, v11), interp(ty))/dai) * (-l10Hash.x)
+            + (dmix(dot(l10Hash, v10), dot(l11Hash, v11), interp(ty))/dbi) * (-l11Hash.x)
+        ) + (dmix(mix(dot(l00Hash, v00), dot(l01Hash, v01), interp(ty)), mix(dot(l10Hash, v10), dot(l11Hash, v11), interp(ty)), interp(tx))/dt2)
+             * (dinterp(tx)/dtx)
+        //df(t)/dtx = (dmix(mix(dot(l00Hash, v00), dot(l01Hash, v01), interp(ty)), mix(dot(l10Hash, v10), dot(l11Hash, v11), interp(ty)), interp(tx))/dt2) * dinterp(tx)/dtx
+
+    df(t)/dty = dmix(mix(dot(l00Hash, v00), dot(l01Hash, v01), interp(ty)), mix(dot(l10Hash, v10), dot(l11Hash, v11), interp(ty)), interp(tx))/dty
+    df(t)/dty = (dmix(mix(dot(l00Hash, v00), dot(l01Hash, v01), interp(ty)), mix(dot(l10Hash, v10), dot(l11Hash, v11), interp(ty)), interp(tx))/da) * (da/dty)
+              + (dmix(mix(dot(l00Hash, v00), dot(l01Hash, v01), interp(ty)), mix(dot(l10Hash, v10), dot(l11Hash, v11), interp(ty)), interp(tx))/db) * (db/dty)
+              + (dmix(mix(dot(l00Hash, v00), dot(l01Hash, v01), interp(ty)), mix(dot(l10Hash, v10), dot(l11Hash, v11), interp(ty)), interp(tx))/dt2) * (dt2/dty)
+    where
+        da/dty  = dmix(dot(l00Hash, v00), dot(l01Hash, v01), interp(ty))/dty =
+                = (dmix(dot(l00Hash, v00), dot(l01Hash, v01), interp(ty))/dai) * (dai/dty)
+                + (dmix(dot(l00Hash, v00), dot(l01Hash, v01), interp(ty))/dbi) * (dbi/dty)
+                + (dmix(dot(l00Hash, v00), dot(l01Hash, v01), interp(ty))/dti) * (dti/dty)
+        where
+            dai/dty = ddot(l00Hash, v00)/dty =  l01Hash.y
+            dbi/dty = ddot(l01Hash, v01)/dty = -l01Hash.y
+            dti/dty = dinterp(ty)/dty
+        therefore
+            da/dty = (dmix(dot(l00Hash, v00), dot(l01Hash, v01), interp(ty))/dai) *   l00Hash.y
+                   + (dmix(dot(l00Hash, v00), dot(l01Hash, v01), interp(ty))/dbi) * (-l01Hash.y)
+                   + (dmix(dot(l00Hash, v00), dot(l01Hash, v01), interp(ty))/dti) * (dinterp(ty)/dty)
+        db/dty = (analogously) = (dmix(dot(l10Hash, v10), dot(l11Hash, v11), interp(ty))/dai) *   l10Hash.y
+                               + (dmix(dot(l10Hash, v10), dot(l11Hash, v11), interp(ty))/dbi) * (-l11Hash.y)
+                               + (dmix(dot(l10Hash, v10), dot(l11Hash, v11), interp(ty))/dti) * (dinterp(ty)/dty)
+        dt2/dty = dinterp(tx)/dty = 0
+    therefore
+        df(t)/dty = (dmix(mix(dot(l00Hash, v00), dot(l01Hash, v01), interp(ty)), mix(dot(l10Hash, v10), dot(l11Hash, v11), interp(ty)), interp(tx))/da) * (
+                        (dmix(dot(l00Hash, v00), dot(l01Hash, v01), interp(ty))/dai) *   l00Hash.y
+                        + (dmix(dot(l00Hash, v00), dot(l01Hash, v01), interp(ty))/dbi) * (-l01Hash.y)
+                        + (dmix(dot(l00Hash, v00), dot(l01Hash, v01), interp(ty))/dti) * (dinterp(ty)/dty)
+                    ) + (dmix(mix(dot(l00Hash, v00), dot(l01Hash, v01), interp(ty)), mix(dot(l10Hash, v10), dot(l11Hash, v11), interp(ty)), interp(tx))/db) * (
+                        (dmix(dot(l10Hash, v10), dot(l11Hash, v11), interp(ty))/dai) *   l10Hash.y
+                        + (dmix(dot(l10Hash, v10), dot(l11Hash, v11), interp(ty))/dbi) * (-l11Hash.y)
+                        + (dmix(dot(l10Hash, v10), dot(l11Hash, v11), interp(ty))/dti) * (dinterp(ty)/dty)
+                    )
+    */
+
+    float dot00 = dot(l00Hash, v00);
+    float dot01 = dot(l01Hash, v01);
+    float dot10 = dot(l10Hash, v10);
+    float dot11 = dot(l11Hash, v11);
+    float mixdot0X = mix(dot00, dot01, tMapped.y);
+    float mixdot1X = mix(dot10, dot11, tMapped.y);
+    float mixDerivativeAdot0X = mixDerivativeA(dot00, dot01, tMapped.y);
+    float mixDerivativeBdot0X = mixDerivativeB(dot00, dot01, tMapped.y);
+    float mixDerivativeAdot1X = mixDerivativeA(dot10, dot11, tMapped.y);
+    float mixDerivativeBdot1X = mixDerivativeB(dot10, dot11, tMapped.y);
+    float mixDerivativeAdotXX = mixDerivativeA(mixdot0X, mixdot1X, tMapped.x);
+    float mixDerivativeBdotXX = mixDerivativeB(mixdot0X, mixdot1X, tMapped.x);
+
+    return vec2(
+        mixDerivativeAdotXX * (
+              mixDerivativeAdot0X * l00Hash.x
+            + mixDerivativeBdot0X * l01Hash.x
+        ) + mixDerivativeBdotXX * (
+              mixDerivativeAdot1X * l10Hash.x
+            + mixDerivativeBdot1X * l11Hash.x
+        ) + mixDerivativeT(mixdot0X, mixdot1X, tMapped.x) * tMappedDerivative.x,
+
+        mixDerivativeAdotXX * (
+             mixDerivativeAdot0X * l00Hash.y
+           + mixDerivativeBdot0X * l01Hash.y
+           + mixDerivativeT(dot00, dot01, tMapped.y) * tMappedDerivative.y
+        ) + mixDerivativeBdotXX * (
+             mixDerivativeAdot1X * l10Hash.y
+           + mixDerivativeBdot1X * l11Hash.y
+           + mixDerivativeT(dot10, dot11, tMapped.y) * tMappedDerivative.y
+        )
     );
 }
 
@@ -1155,6 +1329,139 @@ float perlinNoiseSigned3(vec3 v) {
             tMapped.y
         ),
         tMapped.x
+    );
+}
+
+vec3 perlinNoiseSignedGradient3(vec3 v) {
+    // Lattice point integer coordinates
+    ivec3 l000 = ivec3(floor(v));
+    ivec3 l001 = l000 + ivec3(0, 0, 1);
+    ivec3 l010 = l000 + ivec3(0, 1, 0);
+    ivec3 l011 = l000 + ivec3(0, 1, 1);
+    ivec3 l100 = l000 + ivec3(1, 0, 0);
+    ivec3 l101 = l000 + ivec3(1, 0, 1);
+    ivec3 l110 = l000 + ivec3(1, 1, 0);
+    ivec3 l111 = l000 + ivec3(1, 1, 1);
+    // Deterministically random values for lattice points
+    vec3 l000Hash = ihash3AsUnitVec3(l000);
+    vec3 l001Hash = ihash3AsUnitVec3(l001);
+    vec3 l010Hash = ihash3AsUnitVec3(l010);
+    vec3 l011Hash = ihash3AsUnitVec3(l011);
+    vec3 l100Hash = ihash3AsUnitVec3(l100);
+    vec3 l101Hash = ihash3AsUnitVec3(l101);
+    vec3 l110Hash = ihash3AsUnitVec3(l110);
+    vec3 l111Hash = ihash3AsUnitVec3(l111);
+    // Vectors to V from each lattice point
+    vec3 v000 = fract(v);
+    vec3 v001 = vec3(v000.x    , v000.y    , v000.z - 1);
+    vec3 v010 = vec3(v000.x    , v000.y - 1, v000.z    );
+    vec3 v011 = vec3(v000.x    , v000.y - 1, v000.z - 1);
+    vec3 v100 = vec3(v000.x - 1, v000.y    , v000.z    );
+    vec3 v101 = vec3(v000.x - 1, v000.y    , v000.z - 1);
+    vec3 v110 = vec3(v000.x - 1, v000.y - 1, v000.z    );
+    vec3 v111 = vec3(v000.x - 1, v000.y - 1, v000.z - 1);
+    // Interpolation
+    vec3 t = v000;
+    vec3 tMapped = noiseInterpolation(t);
+    vec3 tMappedDerivative = noiseInterpolationGradient(t);
+
+    // Pattern-expanded from the previous dimension, no proof given
+
+    float dot000 = dot(l000Hash, v000);
+    float dot001 = dot(l001Hash, v001);
+    float dot010 = dot(l010Hash, v010);
+    float dot011 = dot(l011Hash, v011);
+    float dot100 = dot(l100Hash, v100);
+    float dot101 = dot(l101Hash, v101);
+    float dot110 = dot(l110Hash, v110);
+    float dot111 = dot(l111Hash, v111);
+    float mixdot00X = mix(dot000, dot001, tMapped.z);
+    float mixdot01X = mix(dot010, dot011, tMapped.z);
+    float mixdot10X = mix(dot100, dot101, tMapped.z);
+    float mixdot11X = mix(dot110, dot111, tMapped.z);
+    float mixdot0XX = mix(mixdot00X, mixdot01X, tMapped.y);
+    float mixdot1XX = mix(mixdot10X, mixdot11X, tMapped.y);
+    float mixDerivativeAdot00X = mixDerivativeA(dot000, dot001, tMapped.z);
+    float mixDerivativeBdot00X = mixDerivativeB(dot000, dot001, tMapped.z);
+    float mixDerivativeAdot01X = mixDerivativeA(dot010, dot011, tMapped.z);
+    float mixDerivativeBdot01X = mixDerivativeB(dot010, dot011, tMapped.z);
+    float mixDerivativeAdot10X = mixDerivativeA(dot100, dot101, tMapped.z);
+    float mixDerivativeBdot10X = mixDerivativeB(dot100, dot101, tMapped.z);
+    float mixDerivativeAdot11X = mixDerivativeA(dot110, dot111, tMapped.z);
+    float mixDerivativeBdot11X = mixDerivativeB(dot110, dot111, tMapped.z);
+    float mixDerivativeAdot0XX = mixDerivativeA(mixdot00X, mixdot01X, tMapped.y);
+    float mixDerivativeBdot0XX = mixDerivativeB(mixdot00X, mixdot01X, tMapped.y);
+    float mixDerivativeAdot1XX = mixDerivativeA(mixdot10X, mixdot11X, tMapped.y);
+    float mixDerivativeBdot1XX = mixDerivativeB(mixdot10X, mixdot11X, tMapped.y);
+    float mixDerivativeAdotXXX = mixDerivativeA(mixdot0XX, mixdot1XX, tMapped.x);
+    float mixDerivativeBdotXXX = mixDerivativeB(mixdot0XX, mixdot1XX, tMapped.x);
+
+    return vec3(
+        mixDerivativeAdotXXX * (
+            mixDerivativeAdot0XX * (
+                mixDerivativeAdot00X * l000Hash.x
+              + mixDerivativeBdot00X * l001Hash.x
+            )
+            + mixDerivativeBdot0XX * (
+                mixDerivativeAdot01X * l010Hash.x
+              + mixDerivativeBdot01X * l011Hash.x
+            )
+        ) + mixDerivativeBdotXXX * (
+            mixDerivativeAdot1XX * (
+                mixDerivativeAdot10X * l100Hash.x
+              + mixDerivativeBdot10X * l101Hash.x
+            )
+            + mixDerivativeBdot1XX * (
+                mixDerivativeAdot11X * l110Hash.x
+              + mixDerivativeBdot11X * l111Hash.x
+            )
+        ) + mixDerivativeT(mixdot0XX, mixdot1XX, tMapped.x) * tMappedDerivative.x,
+
+        mixDerivativeAdotXXX * (
+            mixDerivativeAdot0XX * (
+                mixDerivativeAdot00X * l000Hash.y
+              + mixDerivativeBdot00X * l001Hash.y
+            )
+            + mixDerivativeBdot0XX * (
+                mixDerivativeAdot01X * l010Hash.y
+              + mixDerivativeBdot01X * l011Hash.y
+            )
+            + mixDerivativeT(mixdot00X, mixdot01X, tMapped.y) * tMappedDerivative.y
+        ) + mixDerivativeBdotXXX * (
+            mixDerivativeAdot1XX * (
+                mixDerivativeAdot10X * l100Hash.y
+              + mixDerivativeBdot10X * l101Hash.y
+            )
+            + mixDerivativeBdot1XX * (
+                mixDerivativeAdot11X * l110Hash.y
+              + mixDerivativeBdot11X * l111Hash.y
+            )
+            + mixDerivativeT(mixdot10X, mixdot11X, tMapped.y) * tMappedDerivative.y
+        ),
+
+        mixDerivativeAdotXXX * (
+            mixDerivativeAdot0XX * (
+                mixDerivativeAdot00X * l000Hash.z
+              + mixDerivativeBdot00X * l001Hash.z
+              + mixDerivativeT(dot000, dot001, tMapped.z) * tMappedDerivative.z
+            )
+            + mixDerivativeBdot0XX * (
+                mixDerivativeAdot01X * l010Hash.z
+              + mixDerivativeBdot01X * l011Hash.z
+              + mixDerivativeT(dot010, dot011, tMapped.z) * tMappedDerivative.z
+            )
+        ) + mixDerivativeBdotXXX * (
+            mixDerivativeAdot1XX * (
+                mixDerivativeAdot10X * l100Hash.z
+              + mixDerivativeBdot10X * l101Hash.z
+              + mixDerivativeT(dot100, dot101, tMapped.z) * tMappedDerivative.z
+            )
+            + mixDerivativeBdot1XX * (
+                mixDerivativeAdot11X * l110Hash.z
+              + mixDerivativeBdot11X * l111Hash.z
+              + mixDerivativeT(dot110, dot111, tMapped.z) * tMappedDerivative.z
+            )
+        )
     );
 }
 
@@ -1277,10 +1584,336 @@ float perlinNoiseSigned4(vec4 v) {
     );
 }
 
+vec4 perlinNoiseSignedGradient4(vec4 v) {
+    // Lattice point integer coordinates
+    ivec4 l0000 = ivec4(floor(v));
+    ivec4 l0001 = l0000 + ivec4(0, 0, 0, 1);
+    ivec4 l0010 = l0000 + ivec4(0, 0, 1, 0);
+    ivec4 l0011 = l0000 + ivec4(0, 0, 1, 1);
+    ivec4 l0100 = l0000 + ivec4(0, 1, 0, 0);
+    ivec4 l0101 = l0000 + ivec4(0, 1, 0, 1);
+    ivec4 l0110 = l0000 + ivec4(0, 1, 1, 0);
+    ivec4 l0111 = l0000 + ivec4(0, 1, 1, 1);
+    ivec4 l1000 = l0000 + ivec4(1, 0, 0, 0);
+    ivec4 l1001 = l0000 + ivec4(1, 0, 0, 1);
+    ivec4 l1010 = l0000 + ivec4(1, 0, 1, 0);
+    ivec4 l1011 = l0000 + ivec4(1, 0, 1, 1);
+    ivec4 l1100 = l0000 + ivec4(1, 1, 0, 0);
+    ivec4 l1101 = l0000 + ivec4(1, 1, 0, 1);
+    ivec4 l1110 = l0000 + ivec4(1, 1, 1, 0);
+    ivec4 l1111 = l0000 + ivec4(1, 1, 1, 1);
+    // Deterministically random values for lattice points
+    vec4 l0000Hash = ihash4AsUnitVec4(l0000);
+    vec4 l0001Hash = ihash4AsUnitVec4(l0001);
+    vec4 l0010Hash = ihash4AsUnitVec4(l0010);
+    vec4 l0011Hash = ihash4AsUnitVec4(l0011);
+    vec4 l0100Hash = ihash4AsUnitVec4(l0100);
+    vec4 l0101Hash = ihash4AsUnitVec4(l0101);
+    vec4 l0110Hash = ihash4AsUnitVec4(l0110);
+    vec4 l0111Hash = ihash4AsUnitVec4(l0111);
+    vec4 l1000Hash = ihash4AsUnitVec4(l1000);
+    vec4 l1001Hash = ihash4AsUnitVec4(l1001);
+    vec4 l1010Hash = ihash4AsUnitVec4(l1010);
+    vec4 l1011Hash = ihash4AsUnitVec4(l1011);
+    vec4 l1100Hash = ihash4AsUnitVec4(l1100);
+    vec4 l1101Hash = ihash4AsUnitVec4(l1101);
+    vec4 l1110Hash = ihash4AsUnitVec4(l1110);
+    vec4 l1111Hash = ihash4AsUnitVec4(l1111);
+    // Vectors to V from each lattice point
+    vec4 v0000 = fract(v);
+    vec4 v0001 = vec4(v0000.x    , v0000.y    , v0000.z    , v0000.w - 1);
+    vec4 v0010 = vec4(v0000.x    , v0000.y    , v0000.z - 1, v0000.w    );
+    vec4 v0011 = vec4(v0000.x    , v0000.y    , v0000.z - 1, v0000.w - 1);
+    vec4 v0100 = vec4(v0000.x    , v0000.y - 1, v0000.z    , v0000.w    );
+    vec4 v0101 = vec4(v0000.x    , v0000.y - 1, v0000.z    , v0000.w - 1);
+    vec4 v0110 = vec4(v0000.x    , v0000.y - 1, v0000.z - 1, v0000.w    );
+    vec4 v0111 = vec4(v0000.x    , v0000.y - 1, v0000.z - 1, v0000.w - 1);
+    vec4 v1000 = vec4(v0000.x - 1, v0000.y    , v0000.z    , v0000.w    );
+    vec4 v1001 = vec4(v0000.x - 1, v0000.y    , v0000.z    , v0000.w - 1);
+    vec4 v1010 = vec4(v0000.x - 1, v0000.y    , v0000.z - 1, v0000.w    );
+    vec4 v1011 = vec4(v0000.x - 1, v0000.y    , v0000.z - 1, v0000.w - 1);
+    vec4 v1100 = vec4(v0000.x - 1, v0000.y - 1, v0000.z    , v0000.w    );
+    vec4 v1101 = vec4(v0000.x - 1, v0000.y - 1, v0000.z    , v0000.w - 1);
+    vec4 v1110 = vec4(v0000.x - 1, v0000.y - 1, v0000.z - 1, v0000.w    );
+    vec4 v1111 = vec4(v0000.x - 1, v0000.y - 1, v0000.z - 1, v0000.w - 1);
+    // Interpolation
+    vec4 t = v0000;
+    vec4 tMapped = noiseInterpolation(t);
+    vec4 tMappedDerivative = noiseInterpolationGradient(t);
+
+    // Pattern-expanded from the previous dimension, no proof given
+
+    float dot0000 = dot(l0000Hash, v0000);
+    float dot0001 = dot(l0001Hash, v0001);
+    float dot0010 = dot(l0010Hash, v0010);
+    float dot0011 = dot(l0011Hash, v0011);
+    float dot0100 = dot(l0100Hash, v0100);
+    float dot0101 = dot(l0101Hash, v0101);
+    float dot0110 = dot(l0110Hash, v0110);
+    float dot0111 = dot(l0111Hash, v0111);
+    float dot1000 = dot(l1000Hash, v1000);
+    float dot1001 = dot(l1001Hash, v1001);
+    float dot1010 = dot(l1010Hash, v1010);
+    float dot1011 = dot(l1011Hash, v1011);
+    float dot1100 = dot(l1100Hash, v1100);
+    float dot1101 = dot(l1101Hash, v1101);
+    float dot1110 = dot(l1110Hash, v1110);
+    float dot1111 = dot(l1111Hash, v1111);
+    float mixdot000X = mix(dot0000, dot0001, tMapped.w);
+    float mixdot001X = mix(dot0010, dot0011, tMapped.w);
+    float mixdot010X = mix(dot0100, dot0101, tMapped.w);
+    float mixdot011X = mix(dot0110, dot0111, tMapped.w);
+    float mixdot100X = mix(dot1000, dot1001, tMapped.w);
+    float mixdot101X = mix(dot1010, dot1011, tMapped.w);
+    float mixdot110X = mix(dot1100, dot1101, tMapped.w);
+    float mixdot111X = mix(dot1110, dot1111, tMapped.w);
+    float mixdot00XX = mix(mixdot000X, mixdot001X, tMapped.z);
+    float mixdot01XX = mix(mixdot010X, mixdot011X, tMapped.z);
+    float mixdot10XX = mix(mixdot100X, mixdot101X, tMapped.z);
+    float mixdot11XX = mix(mixdot110X, mixdot111X, tMapped.z);
+    float mixdot0XXX = mix(mixdot00XX, mixdot01XX, tMapped.y);
+    float mixdot1XXX = mix(mixdot10XX, mixdot11XX, tMapped.y);
+    float mixDerivativeAdot000X = mixDerivativeA(dot0000, dot0001, tMapped.w);
+    float mixDerivativeBdot000X = mixDerivativeB(dot0000, dot0001, tMapped.w);
+    float mixDerivativeAdot001X = mixDerivativeA(dot0010, dot0011, tMapped.w);
+    float mixDerivativeBdot001X = mixDerivativeB(dot0010, dot0011, tMapped.w);
+    float mixDerivativeAdot010X = mixDerivativeA(dot0100, dot0101, tMapped.w);
+    float mixDerivativeBdot010X = mixDerivativeB(dot0100, dot0101, tMapped.w);
+    float mixDerivativeAdot011X = mixDerivativeA(dot0110, dot0111, tMapped.w);
+    float mixDerivativeBdot011X = mixDerivativeB(dot0110, dot0111, tMapped.w);
+    float mixDerivativeAdot100X = mixDerivativeA(dot1000, dot1001, tMapped.w);
+    float mixDerivativeBdot100X = mixDerivativeB(dot1000, dot1001, tMapped.w);
+    float mixDerivativeAdot101X = mixDerivativeA(dot1010, dot1011, tMapped.w);
+    float mixDerivativeBdot101X = mixDerivativeB(dot1010, dot1011, tMapped.w);
+    float mixDerivativeAdot110X = mixDerivativeA(dot1100, dot1101, tMapped.w);
+    float mixDerivativeBdot110X = mixDerivativeB(dot1100, dot1101, tMapped.w);
+    float mixDerivativeAdot111X = mixDerivativeA(dot1110, dot1111, tMapped.w);
+    float mixDerivativeBdot111X = mixDerivativeB(dot1110, dot1111, tMapped.w);
+    float mixDerivativeAdot00XX = mixDerivativeA(mixdot000X, mixdot001X, tMapped.z);
+    float mixDerivativeBdot00XX = mixDerivativeB(mixdot000X, mixdot001X, tMapped.z);
+    float mixDerivativeAdot01XX = mixDerivativeA(mixdot010X, mixdot011X, tMapped.z);
+    float mixDerivativeBdot01XX = mixDerivativeB(mixdot010X, mixdot011X, tMapped.z);
+    float mixDerivativeAdot10XX = mixDerivativeA(mixdot100X, mixdot101X, tMapped.z);
+    float mixDerivativeBdot10XX = mixDerivativeB(mixdot100X, mixdot101X, tMapped.z);
+    float mixDerivativeAdot11XX = mixDerivativeA(mixdot110X, mixdot111X, tMapped.z);
+    float mixDerivativeBdot11XX = mixDerivativeB(mixdot110X, mixdot111X, tMapped.z);
+    float mixDerivativeAdot0XXX = mixDerivativeA(mixdot00XX, mixdot01XX, tMapped.y);
+    float mixDerivativeBdot0XXX = mixDerivativeB(mixdot00XX, mixdot01XX, tMapped.y);
+    float mixDerivativeAdot1XXX = mixDerivativeA(mixdot10XX, mixdot11XX, tMapped.y);
+    float mixDerivativeBdot1XXX = mixDerivativeB(mixdot10XX, mixdot11XX, tMapped.y);
+    float mixDerivativeAdotXXXX = mixDerivativeA(mixdot0XXX, mixdot1XXX, tMapped.x);
+    float mixDerivativeBdotXXXX = mixDerivativeB(mixdot0XXX, mixdot1XXX, tMapped.x);
+
+    return vec4(
+        // dz/dtx
+        mixDerivativeAdotXXXX * (
+            mixDerivativeAdot0XXX * (
+                mixDerivativeAdot00XX * (
+                    mixDerivativeAdot000X * l0000Hash.x
+                  + mixDerivativeBdot000X * l0001Hash.x
+                )
+                + mixDerivativeBdot00XX * (
+                    mixDerivativeAdot001X * l0010Hash.x
+                  + mixDerivativeBdot001X * l0011Hash.x
+                )
+            )
+            + mixDerivativeBdot0XXX * (
+                mixDerivativeAdot01XX * (
+                    mixDerivativeAdot010X * l0100Hash.x
+                  + mixDerivativeBdot010X * l0101Hash.x
+                )
+                + mixDerivativeBdot01XX * (
+                    mixDerivativeAdot011X * l0110Hash.x
+                  + mixDerivativeBdot011X * l0111Hash.x
+                )
+            )
+        )
+        + mixDerivativeBdotXXXX * (
+            mixDerivativeAdot1XXX * (
+                mixDerivativeAdot10XX * (
+                    mixDerivativeAdot100X * l1000Hash.x
+                  + mixDerivativeBdot100X * l1001Hash.x
+                )
+                + mixDerivativeBdot10XX * (
+                    mixDerivativeAdot101X * l1010Hash.x
+                  + mixDerivativeBdot101X * l1011Hash.x
+                )
+            )
+            + mixDerivativeBdot1XXX * (
+                mixDerivativeAdot11XX * (
+                    mixDerivativeAdot110X * l1100Hash.x
+                  + mixDerivativeBdot110X * l1101Hash.x
+                )
+                + mixDerivativeBdot11XX * (
+                    mixDerivativeAdot111X * l1110Hash.x
+                  + mixDerivativeBdot111X * l1111Hash.x
+                )
+            )
+        )
+        + mixDerivativeT(mixdot0XXX, mixdot1XXX, tMapped.x) * tMappedDerivative.x,
+
+        // dz/dty
+        mixDerivativeAdotXXXX * (
+            mixDerivativeAdot0XXX * (
+                mixDerivativeAdot00XX * (
+                    mixDerivativeAdot000X * l0000Hash.y
+                  + mixDerivativeBdot000X * l0001Hash.y
+                )
+                + mixDerivativeBdot00XX * (
+                    mixDerivativeAdot001X * l0010Hash.y
+                  + mixDerivativeBdot001X * l0011Hash.y
+                )
+            )
+            + mixDerivativeBdot0XXX * (
+                mixDerivativeAdot01XX * (
+                    mixDerivativeAdot010X * l0100Hash.y
+                  + mixDerivativeBdot010X * l0101Hash.y
+                )
+                + mixDerivativeBdot01XX * (
+                    mixDerivativeAdot011X * l0110Hash.y
+                  + mixDerivativeBdot011X * l0111Hash.y
+                )
+            )
+            + mixDerivativeT(mixdot00XX, mixdot01XX, tMapped.y) * tMappedDerivative.y
+        )
+        + mixDerivativeBdotXXXX * (
+            mixDerivativeAdot1XXX * (
+                mixDerivativeAdot10XX * (
+                    mixDerivativeAdot100X * l1000Hash.y
+                  + mixDerivativeBdot100X * l1001Hash.y
+                )
+                + mixDerivativeBdot10XX * (
+                    mixDerivativeAdot101X * l1010Hash.y
+                  + mixDerivativeBdot101X * l1011Hash.y
+                )
+            )
+            + mixDerivativeBdot1XXX * (
+                mixDerivativeAdot11XX * (
+                    mixDerivativeAdot110X * l1100Hash.y
+                  + mixDerivativeBdot110X * l1101Hash.y
+                )
+                + mixDerivativeBdot11XX * (
+                    mixDerivativeAdot111X * l1110Hash.y
+                  + mixDerivativeBdot111X * l1111Hash.y
+                )
+            )
+            + mixDerivativeT(mixdot10XX, mixdot11XX, tMapped.y) * tMappedDerivative.y
+        ),
+
+        // dz/dtz
+        mixDerivativeAdotXXXX * (
+            mixDerivativeAdot0XXX * (
+                mixDerivativeAdot00XX * (
+                    mixDerivativeAdot000X * l0000Hash.z
+                  + mixDerivativeBdot000X * l0001Hash.z
+                )
+                + mixDerivativeBdot00XX * (
+                    mixDerivativeAdot001X * l0010Hash.z
+                  + mixDerivativeBdot001X * l0011Hash.z
+                )
+                + mixDerivativeT(mixdot000X, mixdot001X, tMapped.z) * tMappedDerivative.z
+            )
+            + mixDerivativeBdot0XXX * (
+                mixDerivativeAdot01XX * (
+                    mixDerivativeAdot010X * l0100Hash.z
+                  + mixDerivativeBdot010X * l0101Hash.z
+                )
+                + mixDerivativeBdot01XX * (
+                    mixDerivativeAdot011X * l0110Hash.z
+                  + mixDerivativeBdot011X * l0111Hash.z
+                )
+                + mixDerivativeT(mixdot010X, mixdot011X, tMapped.z) * tMappedDerivative.z
+            )
+        )
+        + mixDerivativeBdotXXXX * (
+            mixDerivativeAdot1XXX * (
+                mixDerivativeAdot10XX * (
+                    mixDerivativeAdot100X * l1000Hash.z
+                  + mixDerivativeBdot100X * l1001Hash.z
+                )
+                + mixDerivativeBdot10XX * (
+                    mixDerivativeAdot101X * l1010Hash.z
+                  + mixDerivativeBdot101X * l1011Hash.z
+                )
+                + mixDerivativeT(mixdot100X, mixdot101X, tMapped.z) * tMappedDerivative.z
+            )
+            + mixDerivativeBdot1XXX * (
+                mixDerivativeAdot11XX * (
+                    mixDerivativeAdot110X * l1100Hash.z
+                  + mixDerivativeBdot110X * l1101Hash.z
+                )
+                + mixDerivativeBdot11XX * (
+                    mixDerivativeAdot111X * l1110Hash.z
+                  + mixDerivativeBdot111X * l1111Hash.z
+                )
+                + mixDerivativeT(mixdot110X, mixdot111X, tMapped.z) * tMappedDerivative.z
+            )
+        ),
+
+        // dz/dtw
+        mixDerivativeAdotXXXX * (
+            mixDerivativeAdot0XXX * (
+                mixDerivativeAdot00XX * (
+                    mixDerivativeAdot000X * l0000Hash.w
+                  + mixDerivativeBdot000X * l0001Hash.w
+                  + mixDerivativeT(dot0000, dot0001, tMapped.w) * tMappedDerivative.w
+                )
+                + mixDerivativeBdot00XX * (
+                    mixDerivativeAdot001X * l0010Hash.w
+                  + mixDerivativeBdot001X * l0011Hash.w
+                  + mixDerivativeT(dot0010, dot0011, tMapped.w) * tMappedDerivative.w
+                )
+            )
+            + mixDerivativeBdot0XXX * (
+                mixDerivativeAdot01XX * (
+                    mixDerivativeAdot010X * l0100Hash.w
+                  + mixDerivativeBdot010X * l0101Hash.w
+                  + mixDerivativeT(dot0100, dot0101, tMapped.w) * tMappedDerivative.w
+                )
+                + mixDerivativeBdot01XX * (
+                    mixDerivativeAdot011X * l0110Hash.w
+                  + mixDerivativeBdot011X * l0111Hash.w
+                  + mixDerivativeT(dot0110, dot0111, tMapped.w) * tMappedDerivative.w
+                )
+            )
+        )
+        + mixDerivativeBdotXXXX * (
+            mixDerivativeAdot1XXX * (
+                mixDerivativeAdot10XX * (
+                    mixDerivativeAdot100X * l1000Hash.w
+                  + mixDerivativeBdot100X * l1001Hash.w
+                  + mixDerivativeT(dot1000, dot1001, tMapped.w) * tMappedDerivative.w
+                )
+                + mixDerivativeBdot10XX * (
+                    mixDerivativeAdot101X * l1010Hash.w
+                  + mixDerivativeBdot101X * l1011Hash.w
+                  + mixDerivativeT(dot1010, dot1011, tMapped.w) * tMappedDerivative.w
+                )
+            )
+            + mixDerivativeBdot1XXX * (
+                mixDerivativeAdot11XX * (
+                    mixDerivativeAdot110X * l1100Hash.w
+                  + mixDerivativeBdot110X * l1101Hash.w
+                  + mixDerivativeT(dot1100, dot1101, tMapped.w) * tMappedDerivative.w
+                )
+                + mixDerivativeBdot11XX * (
+                    mixDerivativeAdot111X * l1110Hash.w
+                  + mixDerivativeBdot111X * l1111Hash.w
+                  + mixDerivativeT(dot1110, dot1111, tMapped.w) * tMappedDerivative.w
+                )
+            )
+        )
+    );
+}
+
 float perlinNoiseUnsigned1(float x) { return (perlinNoiseSigned1(x) + 1.0) * 0.5; }
 float perlinNoiseUnsigned2(vec2 v)  { return (perlinNoiseSigned2(v) + 1.0) * 0.5; }
 float perlinNoiseUnsigned3(vec3 v)  { return (perlinNoiseSigned3(v) + 1.0) * 0.5; }
 float perlinNoiseUnsigned4(vec4 v)  { return (perlinNoiseSigned4(v) + 1.0) * 0.5; }
+float perlinNoiseUnsignedGradient1(float x) { return perlinNoiseSignedGradient1(x) * 0.5; }
+vec2  perlinNoiseUnsignedGradient2(vec2 v)  { return perlinNoiseSignedGradient2(v) * 0.5; }
+vec3  perlinNoiseUnsignedGradient3(vec3 v)  { return perlinNoiseSignedGradient3(v) * 0.5; }
+vec4  perlinNoiseUnsignedGradient4(vec4 v)  { return perlinNoiseSignedGradient4(v) * 0.5; }
 
 /*
  * Implementations of fractal sums with the following parameters:
