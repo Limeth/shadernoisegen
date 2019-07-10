@@ -1,5 +1,7 @@
 const float TAU = 6.28318530718;
 const float PI  = 3.14159265359;
+const float FLOAT_MAX = uintBitsToFloat(0x7f7fffff);
+const float FLOAT_MIN = uintBitsToFloat(0xff7fffff);
 
 #define SHADERNOISEGEN(interpolationFunction)                                            \
 float noiseInterpolation(float t) { return interpolationFunction(t); }                   \

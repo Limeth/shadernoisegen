@@ -221,10 +221,24 @@ float ihash1AsUnitVec1(int x) {
     return ((hash & 1) == 0) ? -1.0 : 1.0;
 }
 
+vec2 ihash1AsUnitVec2(int v) {
+    float hash = ihash1AsUnsignedFloat(v);
+    float angle = hash * TAU;
+    return vec2(cos(angle), sin(angle));
+}
+
 vec2 ihash2AsUnitVec2(ivec2 v) {
     float hash = ihash2AsUnsignedFloat(v);
     float angle = hash * TAU;
     return vec2(cos(angle), sin(angle));
+}
+
+vec3 ihash2AsUnitVec3(ivec2 v) {
+    uint hash1 = ihash2(v);
+    uint hash2 = uhash1(hash1);
+    float phi = floatConstructUnsigned(hash1) * TAU;
+    float theta = acos(2 * floatConstructUnsigned(hash2) - 1);
+    return vec3(cos(phi) * sin(theta), sin(phi) * sin(theta), cos(theta));
 }
 
 vec3 ihash3AsUnitVec3(ivec3 v) {
@@ -235,9 +249,26 @@ vec3 ihash3AsUnitVec3(ivec3 v) {
     return vec3(cos(phi) * sin(theta), sin(phi) * sin(theta), cos(theta));
 }
 
+vec4 ihash3AsUnitVec4(ivec3 v) {
+    uint hash1 = ihash3(v);
+    uint hash2 = uhash1(hash1);
+    uint hash3 = uhash1(hash2);
+    uint hash4 = uhash1(hash3);
+    float normal1 = unormal(hash1);
+    float normal2 = unormal(hash2);
+    float normal3 = unormal(hash3);
+    float normal4 = unormal(hash4);
+    vec4 vector = vec4(
+        clamp(normal1, FLOAT_MIN, FLOAT_MAX),
+        clamp(normal2, FLOAT_MIN, FLOAT_MAX),
+        clamp(normal3, FLOAT_MIN, FLOAT_MAX),
+        clamp(normal4, FLOAT_MIN, FLOAT_MAX)
+    );
+
+    return normalize(vector);
+}
+
 vec4 ihash4AsUnitVec4(ivec4 v) {
-    const float maxCoord = uintBitsToFloat(0x7f7fffff);
-    const float minCoord = uintBitsToFloat(0xff7fffff);
     uint hash1 = ihash4(v);
     uint hash2 = uhash1(hash1);
     uint hash3 = uhash1(hash2);
@@ -247,13 +278,41 @@ vec4 ihash4AsUnitVec4(ivec4 v) {
     float normal3 = unormal(hash3);
     float normal4 = unormal(hash4);
     vec4 vector = vec4(
-        clamp(normal1, minCoord, maxCoord),
-        clamp(normal2, minCoord, maxCoord),
-        clamp(normal3, minCoord, maxCoord),
-        clamp(normal4, minCoord, maxCoord)
+        clamp(normal1, FLOAT_MIN, FLOAT_MAX),
+        clamp(normal2, FLOAT_MIN, FLOAT_MAX),
+        clamp(normal3, FLOAT_MIN, FLOAT_MAX),
+        clamp(normal4, FLOAT_MIN, FLOAT_MAX)
     );
 
     return normalize(vector);
+}
+
+void ihash4AsUnitVec5(ivec4 v, out float ox, out float oy, out float oz, out float ow, out float ov) {
+    uint hash1 = ihash4(v);
+    uint hash2 = uhash1(hash1);
+    uint hash3 = uhash1(hash2);
+    uint hash4 = uhash1(hash3);
+    uint hash5 = uhash1(hash4);
+    float normal1 = unormal(hash1);
+    float normal2 = unormal(hash2);
+    float normal3 = unormal(hash3);
+    float normal4 = unormal(hash4);
+    float normal5 = unormal(hash5);
+    ox = clamp(normal1, FLOAT_MIN, FLOAT_MAX);
+    oy = clamp(normal2, FLOAT_MIN, FLOAT_MAX);
+    oz = clamp(normal3, FLOAT_MIN, FLOAT_MAX);
+    ow = clamp(normal4, FLOAT_MIN, FLOAT_MAX);
+    ov = clamp(normal5, FLOAT_MIN, FLOAT_MAX);
+    float len = sqrt(ox*ox + oy*oy + oz*oz + ow*ow + ov*ov);
+    ox /= len;
+    oy /= len;
+    oz /= len;
+    ow /= len;
+    ov /= len;
+}
+
+void ihash4AsUnitVec5(ivec4 v, out vec4 oxyzw, out float ov) {
+    ihash4AsUnitVec5(v, oxyzw.x, oxyzw.y, oxyzw.z, oxyzw.w, ov);
 }
 
 /*
@@ -1914,6 +1973,1045 @@ float perlinNoiseUnsignedGradient1(float x) { return perlinNoiseSignedGradient1(
 vec2  perlinNoiseUnsignedGradient2(vec2 v)  { return perlinNoiseSignedGradient2(v) * 0.5; }
 vec3  perlinNoiseUnsignedGradient3(vec3 v)  { return perlinNoiseSignedGradient3(v) * 0.5; }
 vec4  perlinNoiseUnsignedGradient4(vec4 v)  { return perlinNoiseSignedGradient4(v) * 0.5; }
+
+#define WORLEY_RADIUS_SINGLE(dimension) \
+    ((sqrt(1 + (float(dimension) - 1.0) / 4.0) - sqrt((float(dimension) - 1.0) / 4.0)) / 2.0)
+#define WORLEY_RADIUS_DOUBLE(dimension) \
+    (1.0 / sqrt(dimension))
+
+const float WORLEY_RADIUS_SINGLE_1D = WORLEY_RADIUS_SINGLE(1);
+const float WORLEY_RADIUS_DOUBLE_1D = WORLEY_RADIUS_DOUBLE(1);
+const float WORLEY_RADIUS_SINGLE_2D = WORLEY_RADIUS_SINGLE(2);
+const float WORLEY_RADIUS_DOUBLE_2D = WORLEY_RADIUS_DOUBLE(2);
+const float WORLEY_RADIUS_SINGLE_3D = WORLEY_RADIUS_SINGLE(3);
+const float WORLEY_RADIUS_DOUBLE_3D = WORLEY_RADIUS_DOUBLE(3);
+const float WORLEY_RADIUS_SINGLE_4D = WORLEY_RADIUS_SINGLE(4);
+const float WORLEY_RADIUS_DOUBLE_4D = WORLEY_RADIUS_DOUBLE(4);
+
+void minVector(float vector, inout float minDistance, inout float closestVector) {
+    float currentDistance = length(vector);
+
+    if (currentDistance < minDistance) {
+        minDistance = currentDistance;
+        closestVector = vector;
+    }
+}
+
+void minVector(vec2 vector, inout float minDistance, inout vec2 closestVector) {
+    float currentDistance = length(vector);
+
+    if (currentDistance < minDistance) {
+        minDistance = currentDistance;
+        closestVector = vector;
+    }
+}
+
+void minVector(vec3 vector, inout float minDistance, inout vec3 closestVector) {
+    float currentDistance = length(vector);
+
+    if (currentDistance < minDistance) {
+        minDistance = currentDistance;
+        closestVector = vector;
+    }
+}
+
+void minVector(vec4 vector, inout float minDistance, inout vec4 closestVector) {
+    float currentDistance = length(vector);
+
+    if (currentDistance < minDistance) {
+        minDistance = currentDistance;
+        closestVector = vector;
+    }
+}
+
+float worleyNoiseUnsignedSingle1(float x) {
+    // Lattice point integer coordinates
+    int l0 = int(floor(x));
+    int l1 = l0 + 1;
+    // Deterministically random values for lattice points
+    float l0Hash = ihash1AsUnitVec2(l0).x;
+    float l1Hash = ihash1AsUnitVec2(l1).x;
+    // Vectors to X from each lattice point
+    const float radius = WORLEY_RADIUS_SINGLE_1D;
+    float v0 = l0 + l0Hash * radius;
+    float v1 = l1 + l1Hash * radius;
+
+    // Distance to the closest point
+    float m = FLOAT_MAX;
+    m = min(m, length(v0 - x));
+    m = min(m, length(v1 - x));
+
+    return m;
+}
+
+float worleyNoiseUnsignedSingleGradient1(float x) {
+    // Lattice point integer coordinates
+    int l0 = int(floor(x));
+    int l1 = l0 + 1;
+    // Deterministically random values for lattice points
+    float l0Hash = ihash1AsUnitVec2(l0).x;
+    float l1Hash = ihash1AsUnitVec2(l1).x;
+    // Vectors to X from each lattice point
+    const float radius = WORLEY_RADIUS_SINGLE_1D;
+    float v0 = l0 + l0Hash * radius;
+    float v1 = l1 + l1Hash * radius;
+
+    // Distance to the closest point
+    float m = FLOAT_MAX;
+    float closestPoint = float(0);
+    minVector(v0 - x, m, closestPoint);
+    minVector(v1 - x, m, closestPoint);
+
+    return -normalize(closestPoint);
+}
+
+float worleyNoiseUnsignedSingle2(vec2 v) {
+    // Lattice point integer coordinates
+    ivec2 l00 = ivec2(floor(v));
+    ivec2 l01 = l00 + ivec2(0, 1);
+    ivec2 l10 = l00 + ivec2(1, 0);
+    ivec2 l11 = l00 + ivec2(1, 1);
+    // Deterministically random values for lattice points
+    vec2 l00Hash = ihash2AsUnitVec3(l00).xy;
+    vec2 l01Hash = ihash2AsUnitVec3(l01).xy;
+    vec2 l10Hash = ihash2AsUnitVec3(l10).xy;
+    vec2 l11Hash = ihash2AsUnitVec3(l11).xy;
+    // Vectors to V from each lattice point
+    const float radius = WORLEY_RADIUS_SINGLE_2D;
+    vec2 v00 = l00 + l00Hash * radius;
+    vec2 v01 = l01 + l01Hash * radius;
+    vec2 v10 = l10 + l10Hash * radius;
+    vec2 v11 = l11 + l11Hash * radius;
+
+    // Distance to the closest point
+    float m = FLOAT_MAX;
+    m = min(m, length(v00 - v));
+    m = min(m, length(v01 - v));
+    m = min(m, length(v10 - v));
+    m = min(m, length(v11 - v));
+
+    return m;
+}
+
+vec2 worleyNoiseUnsignedSingleGradient2(vec2 v) {
+    // Lattice point integer coordinates
+    ivec2 l00 = ivec2(floor(v));
+    ivec2 l01 = l00 + ivec2(0, 1);
+    ivec2 l10 = l00 + ivec2(1, 0);
+    ivec2 l11 = l00 + ivec2(1, 1);
+    // Deterministically random values for lattice points
+    vec2 l00Hash = ihash2AsUnitVec3(l00).xy;
+    vec2 l01Hash = ihash2AsUnitVec3(l01).xy;
+    vec2 l10Hash = ihash2AsUnitVec3(l10).xy;
+    vec2 l11Hash = ihash2AsUnitVec3(l11).xy;
+    // Vectors to V from each lattice point
+    const float radius = WORLEY_RADIUS_SINGLE_2D;
+    vec2 v00 = l00 + l00Hash * radius;
+    vec2 v01 = l01 + l01Hash * radius;
+    vec2 v10 = l10 + l10Hash * radius;
+    vec2 v11 = l11 + l11Hash * radius;
+
+    // Distance to the closest point
+    float m = FLOAT_MAX;
+    vec2 closestPoint = vec2(0);
+    minVector(v00 - v, m, closestPoint);
+    minVector(v01 - v, m, closestPoint);
+    minVector(v10 - v, m, closestPoint);
+    minVector(v11 - v, m, closestPoint);
+
+    return -normalize(closestPoint);
+}
+
+float worleyNoiseUnsignedSingle3(vec3 v) {
+    // Lattice point integer coordinates
+    ivec3 l000 = ivec3(floor(v));
+    ivec3 l001 = l000 + ivec3(0, 0, 1);
+    ivec3 l010 = l000 + ivec3(0, 1, 0);
+    ivec3 l011 = l000 + ivec3(0, 1, 1);
+    ivec3 l100 = l000 + ivec3(1, 0, 0);
+    ivec3 l101 = l000 + ivec3(1, 0, 1);
+    ivec3 l110 = l000 + ivec3(1, 1, 0);
+    ivec3 l111 = l000 + ivec3(1, 1, 1);
+    // Deterministically random values for lattice points
+    vec3 l000Hash = ihash3AsUnitVec4(l000).xyz;
+    vec3 l001Hash = ihash3AsUnitVec4(l001).xyz;
+    vec3 l010Hash = ihash3AsUnitVec4(l010).xyz;
+    vec3 l011Hash = ihash3AsUnitVec4(l011).xyz;
+    vec3 l100Hash = ihash3AsUnitVec4(l100).xyz;
+    vec3 l101Hash = ihash3AsUnitVec4(l101).xyz;
+    vec3 l110Hash = ihash3AsUnitVec4(l110).xyz;
+    vec3 l111Hash = ihash3AsUnitVec4(l111).xyz;
+    // Vectors to V from each lattice point
+    const float radius = WORLEY_RADIUS_SINGLE_3D;
+    vec3 v000 = l000 + l000Hash * radius;
+    vec3 v001 = l001 + l001Hash * radius;
+    vec3 v010 = l010 + l010Hash * radius;
+    vec3 v011 = l011 + l011Hash * radius;
+    vec3 v100 = l100 + l100Hash * radius;
+    vec3 v101 = l101 + l101Hash * radius;
+    vec3 v110 = l110 + l110Hash * radius;
+    vec3 v111 = l111 + l111Hash * radius;
+
+    // Distance to the closest point
+    float m = FLOAT_MAX;
+    m = min(m, length(v000 - v));
+    m = min(m, length(v001 - v));
+    m = min(m, length(v010 - v));
+    m = min(m, length(v011 - v));
+    m = min(m, length(v100 - v));
+    m = min(m, length(v101 - v));
+    m = min(m, length(v110 - v));
+    m = min(m, length(v111 - v));
+
+    return m;
+}
+
+vec3 worleyNoiseUnsignedSingleGradient3(vec3 v) {
+    // Lattice point integer coordinates
+    ivec3 l000 = ivec3(floor(v));
+    ivec3 l001 = l000 + ivec3(0, 0, 1);
+    ivec3 l010 = l000 + ivec3(0, 1, 0);
+    ivec3 l011 = l000 + ivec3(0, 1, 1);
+    ivec3 l100 = l000 + ivec3(1, 0, 0);
+    ivec3 l101 = l000 + ivec3(1, 0, 1);
+    ivec3 l110 = l000 + ivec3(1, 1, 0);
+    ivec3 l111 = l000 + ivec3(1, 1, 1);
+    // Deterministically random values for lattice points
+    vec3 l000Hash = ihash3AsUnitVec4(l000).xyz;
+    vec3 l001Hash = ihash3AsUnitVec4(l001).xyz;
+    vec3 l010Hash = ihash3AsUnitVec4(l010).xyz;
+    vec3 l011Hash = ihash3AsUnitVec4(l011).xyz;
+    vec3 l100Hash = ihash3AsUnitVec4(l100).xyz;
+    vec3 l101Hash = ihash3AsUnitVec4(l101).xyz;
+    vec3 l110Hash = ihash3AsUnitVec4(l110).xyz;
+    vec3 l111Hash = ihash3AsUnitVec4(l111).xyz;
+    // Vectors to V from each lattice point
+    const float radius = WORLEY_RADIUS_SINGLE_3D;
+    vec3 v000 = l000 + l000Hash * radius;
+    vec3 v001 = l001 + l001Hash * radius;
+    vec3 v010 = l010 + l010Hash * radius;
+    vec3 v011 = l011 + l011Hash * radius;
+    vec3 v100 = l100 + l100Hash * radius;
+    vec3 v101 = l101 + l101Hash * radius;
+    vec3 v110 = l110 + l110Hash * radius;
+    vec3 v111 = l111 + l111Hash * radius;
+
+    // Distance to the closest point
+    float m = FLOAT_MAX;
+    vec3 closestPoint = vec3(0);
+    minVector(v000 - v, m, closestPoint);
+    minVector(v001 - v, m, closestPoint);
+    minVector(v010 - v, m, closestPoint);
+    minVector(v011 - v, m, closestPoint);
+    minVector(v100 - v, m, closestPoint);
+    minVector(v101 - v, m, closestPoint);
+    minVector(v110 - v, m, closestPoint);
+    minVector(v111 - v, m, closestPoint);
+
+    return -normalize(closestPoint);
+}
+
+float worleyNoiseUnsignedSingle4(vec4 v) {
+    // Lattice point integer coordinates
+    ivec4 l0000 = ivec4(floor(v));
+    ivec4 l0001 = l0000 + ivec4(0, 0, 0, 1);
+    ivec4 l0010 = l0000 + ivec4(0, 0, 1, 0);
+    ivec4 l0011 = l0000 + ivec4(0, 0, 1, 1);
+    ivec4 l0100 = l0000 + ivec4(0, 1, 0, 0);
+    ivec4 l0101 = l0000 + ivec4(0, 1, 0, 1);
+    ivec4 l0110 = l0000 + ivec4(0, 1, 1, 0);
+    ivec4 l0111 = l0000 + ivec4(0, 1, 1, 1);
+    ivec4 l1000 = l0000 + ivec4(1, 0, 0, 0);
+    ivec4 l1001 = l0000 + ivec4(1, 0, 0, 1);
+    ivec4 l1010 = l0000 + ivec4(1, 0, 1, 0);
+    ivec4 l1011 = l0000 + ivec4(1, 0, 1, 1);
+    ivec4 l1100 = l0000 + ivec4(1, 1, 0, 0);
+    ivec4 l1101 = l0000 + ivec4(1, 1, 0, 1);
+    ivec4 l1110 = l0000 + ivec4(1, 1, 1, 0);
+    ivec4 l1111 = l0000 + ivec4(1, 1, 1, 1);
+    // Deterministically random values for lattice points
+    float unused;
+    vec4 l0000Hash; ihash4AsUnitVec5(l0000, l0000Hash, unused);
+    vec4 l0001Hash; ihash4AsUnitVec5(l0001, l0001Hash, unused);
+    vec4 l0010Hash; ihash4AsUnitVec5(l0010, l0010Hash, unused);
+    vec4 l0011Hash; ihash4AsUnitVec5(l0011, l0011Hash, unused);
+    vec4 l0100Hash; ihash4AsUnitVec5(l0100, l0100Hash, unused);
+    vec4 l0101Hash; ihash4AsUnitVec5(l0101, l0101Hash, unused);
+    vec4 l0110Hash; ihash4AsUnitVec5(l0110, l0110Hash, unused);
+    vec4 l0111Hash; ihash4AsUnitVec5(l0111, l0111Hash, unused);
+    vec4 l1000Hash; ihash4AsUnitVec5(l1000, l1000Hash, unused);
+    vec4 l1001Hash; ihash4AsUnitVec5(l1001, l1001Hash, unused);
+    vec4 l1010Hash; ihash4AsUnitVec5(l1010, l1010Hash, unused);
+    vec4 l1011Hash; ihash4AsUnitVec5(l1011, l1011Hash, unused);
+    vec4 l1100Hash; ihash4AsUnitVec5(l1100, l1100Hash, unused);
+    vec4 l1101Hash; ihash4AsUnitVec5(l1101, l1101Hash, unused);
+    vec4 l1110Hash; ihash4AsUnitVec5(l1110, l1110Hash, unused);
+    vec4 l1111Hash; ihash4AsUnitVec5(l1111, l1111Hash, unused);
+    // Vectors to V from each lattice point
+    const float radius = WORLEY_RADIUS_SINGLE_4D;
+    vec4 v0000 = l0000 + l0000Hash * radius;
+    vec4 v0001 = l0001 + l0001Hash * radius;
+    vec4 v0010 = l0010 + l0010Hash * radius;
+    vec4 v0011 = l0011 + l0011Hash * radius;
+    vec4 v0100 = l0100 + l0100Hash * radius;
+    vec4 v0101 = l0101 + l0101Hash * radius;
+    vec4 v0110 = l0110 + l0110Hash * radius;
+    vec4 v0111 = l0111 + l0111Hash * radius;
+    vec4 v1000 = l1000 + l1000Hash * radius;
+    vec4 v1001 = l1001 + l1001Hash * radius;
+    vec4 v1010 = l1010 + l1010Hash * radius;
+    vec4 v1011 = l1011 + l1011Hash * radius;
+    vec4 v1100 = l1100 + l1100Hash * radius;
+    vec4 v1101 = l1101 + l1101Hash * radius;
+    vec4 v1110 = l1110 + l1110Hash * radius;
+    vec4 v1111 = l1111 + l1111Hash * radius;
+
+    // Distance to the closest point
+    float m = FLOAT_MAX;
+    m = min(m, length(v0000 - v));
+    m = min(m, length(v0001 - v));
+    m = min(m, length(v0010 - v));
+    m = min(m, length(v0011 - v));
+    m = min(m, length(v0100 - v));
+    m = min(m, length(v0101 - v));
+    m = min(m, length(v0110 - v));
+    m = min(m, length(v0111 - v));
+    m = min(m, length(v1000 - v));
+    m = min(m, length(v1001 - v));
+    m = min(m, length(v1010 - v));
+    m = min(m, length(v1011 - v));
+    m = min(m, length(v1100 - v));
+    m = min(m, length(v1101 - v));
+    m = min(m, length(v1110 - v));
+    m = min(m, length(v1111 - v));
+
+    return m;
+}
+
+vec4 worleyNoiseUnsignedSingleGradient4(vec4 v) {
+    // Lattice point integer coordinates
+    ivec4 l0000 = ivec4(floor(v));
+    ivec4 l0001 = l0000 + ivec4(0, 0, 0, 1);
+    ivec4 l0010 = l0000 + ivec4(0, 0, 1, 0);
+    ivec4 l0011 = l0000 + ivec4(0, 0, 1, 1);
+    ivec4 l0100 = l0000 + ivec4(0, 1, 0, 0);
+    ivec4 l0101 = l0000 + ivec4(0, 1, 0, 1);
+    ivec4 l0110 = l0000 + ivec4(0, 1, 1, 0);
+    ivec4 l0111 = l0000 + ivec4(0, 1, 1, 1);
+    ivec4 l1000 = l0000 + ivec4(1, 0, 0, 0);
+    ivec4 l1001 = l0000 + ivec4(1, 0, 0, 1);
+    ivec4 l1010 = l0000 + ivec4(1, 0, 1, 0);
+    ivec4 l1011 = l0000 + ivec4(1, 0, 1, 1);
+    ivec4 l1100 = l0000 + ivec4(1, 1, 0, 0);
+    ivec4 l1101 = l0000 + ivec4(1, 1, 0, 1);
+    ivec4 l1110 = l0000 + ivec4(1, 1, 1, 0);
+    ivec4 l1111 = l0000 + ivec4(1, 1, 1, 1);
+    // Deterministically random values for lattice points
+    float unused;
+    vec4 l0000Hash; ihash4AsUnitVec5(l0000, l0000Hash, unused);
+    vec4 l0001Hash; ihash4AsUnitVec5(l0001, l0001Hash, unused);
+    vec4 l0010Hash; ihash4AsUnitVec5(l0010, l0010Hash, unused);
+    vec4 l0011Hash; ihash4AsUnitVec5(l0011, l0011Hash, unused);
+    vec4 l0100Hash; ihash4AsUnitVec5(l0100, l0100Hash, unused);
+    vec4 l0101Hash; ihash4AsUnitVec5(l0101, l0101Hash, unused);
+    vec4 l0110Hash; ihash4AsUnitVec5(l0110, l0110Hash, unused);
+    vec4 l0111Hash; ihash4AsUnitVec5(l0111, l0111Hash, unused);
+    vec4 l1000Hash; ihash4AsUnitVec5(l1000, l1000Hash, unused);
+    vec4 l1001Hash; ihash4AsUnitVec5(l1001, l1001Hash, unused);
+    vec4 l1010Hash; ihash4AsUnitVec5(l1010, l1010Hash, unused);
+    vec4 l1011Hash; ihash4AsUnitVec5(l1011, l1011Hash, unused);
+    vec4 l1100Hash; ihash4AsUnitVec5(l1100, l1100Hash, unused);
+    vec4 l1101Hash; ihash4AsUnitVec5(l1101, l1101Hash, unused);
+    vec4 l1110Hash; ihash4AsUnitVec5(l1110, l1110Hash, unused);
+    vec4 l1111Hash; ihash4AsUnitVec5(l1111, l1111Hash, unused);
+    // Vectors to V from each lattice point
+    const float radius = WORLEY_RADIUS_SINGLE_4D;
+    vec4 v0000 = l0000 + l0000Hash * radius;
+    vec4 v0001 = l0001 + l0001Hash * radius;
+    vec4 v0010 = l0010 + l0010Hash * radius;
+    vec4 v0011 = l0011 + l0011Hash * radius;
+    vec4 v0100 = l0100 + l0100Hash * radius;
+    vec4 v0101 = l0101 + l0101Hash * radius;
+    vec4 v0110 = l0110 + l0110Hash * radius;
+    vec4 v0111 = l0111 + l0111Hash * radius;
+    vec4 v1000 = l1000 + l1000Hash * radius;
+    vec4 v1001 = l1001 + l1001Hash * radius;
+    vec4 v1010 = l1010 + l1010Hash * radius;
+    vec4 v1011 = l1011 + l1011Hash * radius;
+    vec4 v1100 = l1100 + l1100Hash * radius;
+    vec4 v1101 = l1101 + l1101Hash * radius;
+    vec4 v1110 = l1110 + l1110Hash * radius;
+    vec4 v1111 = l1111 + l1111Hash * radius;
+
+    // Distance to the closest point
+    float m = FLOAT_MAX;
+    vec4 closestPoint = vec4(0);
+    minVector(v0000 - v, m, closestPoint);
+    minVector(v0001 - v, m, closestPoint);
+    minVector(v0010 - v, m, closestPoint);
+    minVector(v0011 - v, m, closestPoint);
+    minVector(v0100 - v, m, closestPoint);
+    minVector(v0101 - v, m, closestPoint);
+    minVector(v0110 - v, m, closestPoint);
+    minVector(v0111 - v, m, closestPoint);
+    minVector(v1000 - v, m, closestPoint);
+    minVector(v1001 - v, m, closestPoint);
+    minVector(v1010 - v, m, closestPoint);
+    minVector(v1011 - v, m, closestPoint);
+    minVector(v1100 - v, m, closestPoint);
+    minVector(v1101 - v, m, closestPoint);
+    minVector(v1110 - v, m, closestPoint);
+    minVector(v1111 - v, m, closestPoint);
+
+    return -normalize(closestPoint);
+}
+
+float worleyNoiseUnsignedDouble1(float x) {
+    // Lattice point integer coordinates
+    int l0 = int(floor(x)) - 1;
+    int l1 = l0 + 1;
+    int l2 = l0 + 2;
+    // Deterministically random values for lattice points
+    // Excluding corner points (those made of only 0's and 3's)
+    float l1Hash = ihash1AsUnitVec2(l1).x;
+    float l2Hash = ihash1AsUnitVec2(l2).x;
+    // Vectors to X from each lattice point
+    const float radius = WORLEY_RADIUS_DOUBLE_1D;
+    float v1 = l1 + l1Hash * radius;
+    float v2 = l2 + l2Hash * radius;
+
+    // Distance to the closest point
+    float m = FLOAT_MAX;
+    m = min(m, length(v1 - x));
+    m = min(m, length(v2 - x));
+
+    return m;
+}
+
+float worleyNoiseUnsignedDoubleGradient1(float x) {
+    // Lattice point integer coordinates
+    int l0 = int(floor(x)) - 1;
+    int l1 = l0 + 1;
+    int l2 = l0 + 2;
+    // Deterministically random values for lattice points
+    // Excluding corner points (those made of only 0's and 3's)
+    float l1Hash = ihash1AsUnitVec2(l1).x;
+    float l2Hash = ihash1AsUnitVec2(l2).x;
+    // Vectors to X from each lattice point
+    const float radius = WORLEY_RADIUS_DOUBLE_1D;
+    float v1 = l1 + l1Hash * radius;
+    float v2 = l2 + l2Hash * radius;
+
+    // Distance to the closest point
+    float m = FLOAT_MAX;
+    float closestPoint = float(0);
+    minVector(v1 - x, m, closestPoint);
+    minVector(v2 - x, m, closestPoint);
+
+    return -normalize(closestPoint);
+}
+
+float worleyNoiseUnsignedDouble2(vec2 v) {
+    // Lattice point integer coordinates
+    ivec2 l00 = ivec2(floor(v)) - ivec2(1, 1);
+    ivec2 l01 = l00 + ivec2(0, 1);
+    ivec2 l02 = l00 + ivec2(0, 2);
+    ivec2 l10 = l00 + ivec2(1, 0);
+    ivec2 l11 = l00 + ivec2(1, 1);
+    ivec2 l12 = l00 + ivec2(1, 2);
+    ivec2 l13 = l00 + ivec2(1, 3);
+    ivec2 l20 = l00 + ivec2(2, 0);
+    ivec2 l21 = l00 + ivec2(2, 1);
+    ivec2 l22 = l00 + ivec2(2, 2);
+    ivec2 l23 = l00 + ivec2(2, 3);
+    ivec2 l31 = l00 + ivec2(3, 1);
+    ivec2 l32 = l00 + ivec2(3, 2);
+    // Deterministically random values for lattice points
+    // Excluding corner points (those made of only 0's and 3's)
+    vec2 l01Hash = ihash2AsUnitVec3(l01).xy;
+    vec2 l02Hash = ihash2AsUnitVec3(l02).xy;
+    vec2 l10Hash = ihash2AsUnitVec3(l10).xy;
+    vec2 l11Hash = ihash2AsUnitVec3(l11).xy;
+    vec2 l12Hash = ihash2AsUnitVec3(l12).xy;
+    vec2 l13Hash = ihash2AsUnitVec3(l13).xy;
+    vec2 l20Hash = ihash2AsUnitVec3(l20).xy;
+    vec2 l21Hash = ihash2AsUnitVec3(l21).xy;
+    vec2 l22Hash = ihash2AsUnitVec3(l22).xy;
+    vec2 l23Hash = ihash2AsUnitVec3(l23).xy;
+    vec2 l31Hash = ihash2AsUnitVec3(l31).xy;
+    vec2 l32Hash = ihash2AsUnitVec3(l32).xy;
+    // Vectors to V from each lattice point
+    const float radius = WORLEY_RADIUS_DOUBLE_2D;
+    vec2 v01 = l01 + l01Hash * radius;
+    vec2 v02 = l02 + l02Hash * radius;
+    vec2 v10 = l10 + l10Hash * radius;
+    vec2 v11 = l11 + l11Hash * radius;
+    vec2 v12 = l12 + l12Hash * radius;
+    vec2 v13 = l13 + l13Hash * radius;
+    vec2 v20 = l20 + l20Hash * radius;
+    vec2 v21 = l21 + l21Hash * radius;
+    vec2 v22 = l22 + l22Hash * radius;
+    vec2 v23 = l23 + l23Hash * radius;
+    vec2 v31 = l31 + l31Hash * radius;
+    vec2 v32 = l32 + l32Hash * radius;
+
+    // Distance to the closest point
+    float m = FLOAT_MAX;
+    m = min(m, length(v01 - v));
+    m = min(m, length(v02 - v));
+    m = min(m, length(v10 - v));
+    m = min(m, length(v11 - v));
+    m = min(m, length(v12 - v));
+    m = min(m, length(v13 - v));
+    m = min(m, length(v20 - v));
+    m = min(m, length(v21 - v));
+    m = min(m, length(v22 - v));
+    m = min(m, length(v23 - v));
+    m = min(m, length(v31 - v));
+    m = min(m, length(v32 - v));
+
+    return m;
+}
+
+vec2 worleyNoiseUnsignedDoubleGradient2(vec2 v) {
+    // Lattice point integer coordinates
+    ivec2 l00 = ivec2(floor(v)) - ivec2(1, 1);
+    ivec2 l01 = l00 + ivec2(0, 1);
+    ivec2 l02 = l00 + ivec2(0, 2);
+    ivec2 l10 = l00 + ivec2(1, 0);
+    ivec2 l11 = l00 + ivec2(1, 1);
+    ivec2 l12 = l00 + ivec2(1, 2);
+    ivec2 l13 = l00 + ivec2(1, 3);
+    ivec2 l20 = l00 + ivec2(2, 0);
+    ivec2 l21 = l00 + ivec2(2, 1);
+    ivec2 l22 = l00 + ivec2(2, 2);
+    ivec2 l23 = l00 + ivec2(2, 3);
+    ivec2 l31 = l00 + ivec2(3, 1);
+    ivec2 l32 = l00 + ivec2(3, 2);
+    // Deterministically random values for lattice points
+    // Excluding corner points (those made of only 0's and 3's)
+    vec2 l01Hash = ihash2AsUnitVec3(l01).xy;
+    vec2 l02Hash = ihash2AsUnitVec3(l02).xy;
+    vec2 l10Hash = ihash2AsUnitVec3(l10).xy;
+    vec2 l11Hash = ihash2AsUnitVec3(l11).xy;
+    vec2 l12Hash = ihash2AsUnitVec3(l12).xy;
+    vec2 l13Hash = ihash2AsUnitVec3(l13).xy;
+    vec2 l20Hash = ihash2AsUnitVec3(l20).xy;
+    vec2 l21Hash = ihash2AsUnitVec3(l21).xy;
+    vec2 l22Hash = ihash2AsUnitVec3(l22).xy;
+    vec2 l23Hash = ihash2AsUnitVec3(l23).xy;
+    vec2 l31Hash = ihash2AsUnitVec3(l31).xy;
+    vec2 l32Hash = ihash2AsUnitVec3(l32).xy;
+    // Vectors to V from each lattice point
+    const float radius = WORLEY_RADIUS_DOUBLE_2D;
+    vec2 v01 = l01 + l01Hash * radius;
+    vec2 v02 = l02 + l02Hash * radius;
+    vec2 v10 = l10 + l10Hash * radius;
+    vec2 v11 = l11 + l11Hash * radius;
+    vec2 v12 = l12 + l12Hash * radius;
+    vec2 v13 = l13 + l13Hash * radius;
+    vec2 v20 = l20 + l20Hash * radius;
+    vec2 v21 = l21 + l21Hash * radius;
+    vec2 v22 = l22 + l22Hash * radius;
+    vec2 v23 = l23 + l23Hash * radius;
+    vec2 v31 = l31 + l31Hash * radius;
+    vec2 v32 = l32 + l32Hash * radius;
+
+    // Distance to the closest point
+    float m = FLOAT_MAX;
+    vec2 closestPoint = vec2(0);
+    minVector(v01 - v, m, closestPoint);
+    minVector(v02 - v, m, closestPoint);
+    minVector(v10 - v, m, closestPoint);
+    minVector(v11 - v, m, closestPoint);
+    minVector(v12 - v, m, closestPoint);
+    minVector(v13 - v, m, closestPoint);
+    minVector(v20 - v, m, closestPoint);
+    minVector(v21 - v, m, closestPoint);
+    minVector(v22 - v, m, closestPoint);
+    minVector(v23 - v, m, closestPoint);
+    minVector(v31 - v, m, closestPoint);
+    minVector(v32 - v, m, closestPoint);
+
+    return -normalize(closestPoint);
+}
+
+float worleyNoiseUnsignedDouble3(vec3 v) {
+    // Lattice point integer coordinates
+    ivec3 l000 = ivec3(floor(v)) - ivec3(1, 1, 1);
+    ivec3 l001 = l000 + ivec3(0, 0, 1);
+    ivec3 l002 = l000 + ivec3(0, 0, 2);
+    ivec3 l010 = l000 + ivec3(0, 1, 0);
+    ivec3 l011 = l000 + ivec3(0, 1, 1);
+    ivec3 l012 = l000 + ivec3(0, 1, 2);
+    ivec3 l013 = l000 + ivec3(0, 1, 3);
+    ivec3 l020 = l000 + ivec3(0, 2, 0);
+    ivec3 l021 = l000 + ivec3(0, 2, 1);
+    ivec3 l022 = l000 + ivec3(0, 2, 2);
+    ivec3 l023 = l000 + ivec3(0, 2, 3);
+    ivec3 l031 = l000 + ivec3(0, 3, 1);
+    ivec3 l032 = l000 + ivec3(0, 3, 2);
+    ivec3 l100 = l000 + ivec3(1, 0, 0);
+    ivec3 l101 = l000 + ivec3(1, 0, 1);
+    ivec3 l102 = l000 + ivec3(1, 0, 2);
+    ivec3 l103 = l000 + ivec3(1, 0, 3);
+    ivec3 l110 = l000 + ivec3(1, 1, 0);
+    ivec3 l111 = l000 + ivec3(1, 1, 1);
+    ivec3 l112 = l000 + ivec3(1, 1, 2);
+    ivec3 l113 = l000 + ivec3(1, 1, 3);
+    ivec3 l120 = l000 + ivec3(1, 2, 0);
+    ivec3 l121 = l000 + ivec3(1, 2, 1);
+    ivec3 l122 = l000 + ivec3(1, 2, 2);
+    ivec3 l123 = l000 + ivec3(1, 2, 3);
+    ivec3 l130 = l000 + ivec3(1, 3, 0);
+    ivec3 l131 = l000 + ivec3(1, 3, 1);
+    ivec3 l132 = l000 + ivec3(1, 3, 2);
+    ivec3 l133 = l000 + ivec3(1, 3, 3);
+    ivec3 l200 = l000 + ivec3(2, 0, 0);
+    ivec3 l201 = l000 + ivec3(2, 0, 1);
+    ivec3 l202 = l000 + ivec3(2, 0, 2);
+    ivec3 l203 = l000 + ivec3(2, 0, 3);
+    ivec3 l210 = l000 + ivec3(2, 1, 0);
+    ivec3 l211 = l000 + ivec3(2, 1, 1);
+    ivec3 l212 = l000 + ivec3(2, 1, 2);
+    ivec3 l213 = l000 + ivec3(2, 1, 3);
+    ivec3 l220 = l000 + ivec3(2, 2, 0);
+    ivec3 l221 = l000 + ivec3(2, 2, 1);
+    ivec3 l222 = l000 + ivec3(2, 2, 2);
+    ivec3 l223 = l000 + ivec3(2, 2, 3);
+    ivec3 l230 = l000 + ivec3(2, 3, 0);
+    ivec3 l231 = l000 + ivec3(2, 3, 1);
+    ivec3 l232 = l000 + ivec3(2, 3, 2);
+    ivec3 l233 = l000 + ivec3(2, 3, 3);
+    ivec3 l301 = l000 + ivec3(3, 0, 1);
+    ivec3 l302 = l000 + ivec3(3, 0, 2);
+    ivec3 l310 = l000 + ivec3(3, 1, 0);
+    ivec3 l311 = l000 + ivec3(3, 1, 1);
+    ivec3 l312 = l000 + ivec3(3, 1, 2);
+    ivec3 l313 = l000 + ivec3(3, 1, 3);
+    ivec3 l320 = l000 + ivec3(3, 2, 0);
+    ivec3 l321 = l000 + ivec3(3, 2, 1);
+    ivec3 l322 = l000 + ivec3(3, 2, 2);
+    ivec3 l323 = l000 + ivec3(3, 2, 3);
+    ivec3 l331 = l000 + ivec3(3, 3, 1);
+    ivec3 l332 = l000 + ivec3(3, 3, 2);
+    // Deterministically random values for lattice points
+    // Excluding corner points (those made of only 0's and 3's)
+    vec3 l001Hash = ihash3AsUnitVec4(l001).xyz;
+    vec3 l002Hash = ihash3AsUnitVec4(l002).xyz;
+    vec3 l010Hash = ihash3AsUnitVec4(l010).xyz;
+    vec3 l011Hash = ihash3AsUnitVec4(l011).xyz;
+    vec3 l012Hash = ihash3AsUnitVec4(l012).xyz;
+    vec3 l013Hash = ihash3AsUnitVec4(l013).xyz;
+    vec3 l020Hash = ihash3AsUnitVec4(l020).xyz;
+    vec3 l021Hash = ihash3AsUnitVec4(l021).xyz;
+    vec3 l022Hash = ihash3AsUnitVec4(l022).xyz;
+    vec3 l023Hash = ihash3AsUnitVec4(l023).xyz;
+    vec3 l031Hash = ihash3AsUnitVec4(l031).xyz;
+    vec3 l032Hash = ihash3AsUnitVec4(l032).xyz;
+    vec3 l100Hash = ihash3AsUnitVec4(l100).xyz;
+    vec3 l101Hash = ihash3AsUnitVec4(l101).xyz;
+    vec3 l102Hash = ihash3AsUnitVec4(l102).xyz;
+    vec3 l103Hash = ihash3AsUnitVec4(l103).xyz;
+    vec3 l110Hash = ihash3AsUnitVec4(l110).xyz;
+    vec3 l111Hash = ihash3AsUnitVec4(l111).xyz;
+    vec3 l112Hash = ihash3AsUnitVec4(l112).xyz;
+    vec3 l113Hash = ihash3AsUnitVec4(l113).xyz;
+    vec3 l120Hash = ihash3AsUnitVec4(l120).xyz;
+    vec3 l121Hash = ihash3AsUnitVec4(l121).xyz;
+    vec3 l122Hash = ihash3AsUnitVec4(l122).xyz;
+    vec3 l123Hash = ihash3AsUnitVec4(l123).xyz;
+    vec3 l130Hash = ihash3AsUnitVec4(l130).xyz;
+    vec3 l131Hash = ihash3AsUnitVec4(l131).xyz;
+    vec3 l132Hash = ihash3AsUnitVec4(l132).xyz;
+    vec3 l133Hash = ihash3AsUnitVec4(l133).xyz;
+    vec3 l200Hash = ihash3AsUnitVec4(l200).xyz;
+    vec3 l201Hash = ihash3AsUnitVec4(l201).xyz;
+    vec3 l202Hash = ihash3AsUnitVec4(l202).xyz;
+    vec3 l203Hash = ihash3AsUnitVec4(l203).xyz;
+    vec3 l210Hash = ihash3AsUnitVec4(l210).xyz;
+    vec3 l211Hash = ihash3AsUnitVec4(l211).xyz;
+    vec3 l212Hash = ihash3AsUnitVec4(l212).xyz;
+    vec3 l213Hash = ihash3AsUnitVec4(l213).xyz;
+    vec3 l220Hash = ihash3AsUnitVec4(l220).xyz;
+    vec3 l221Hash = ihash3AsUnitVec4(l221).xyz;
+    vec3 l222Hash = ihash3AsUnitVec4(l222).xyz;
+    vec3 l223Hash = ihash3AsUnitVec4(l223).xyz;
+    vec3 l230Hash = ihash3AsUnitVec4(l230).xyz;
+    vec3 l231Hash = ihash3AsUnitVec4(l231).xyz;
+    vec3 l232Hash = ihash3AsUnitVec4(l232).xyz;
+    vec3 l233Hash = ihash3AsUnitVec4(l233).xyz;
+    vec3 l301Hash = ihash3AsUnitVec4(l301).xyz;
+    vec3 l302Hash = ihash3AsUnitVec4(l302).xyz;
+    vec3 l310Hash = ihash3AsUnitVec4(l310).xyz;
+    vec3 l311Hash = ihash3AsUnitVec4(l311).xyz;
+    vec3 l312Hash = ihash3AsUnitVec4(l312).xyz;
+    vec3 l313Hash = ihash3AsUnitVec4(l313).xyz;
+    vec3 l320Hash = ihash3AsUnitVec4(l320).xyz;
+    vec3 l321Hash = ihash3AsUnitVec4(l321).xyz;
+    vec3 l322Hash = ihash3AsUnitVec4(l322).xyz;
+    vec3 l323Hash = ihash3AsUnitVec4(l323).xyz;
+    vec3 l331Hash = ihash3AsUnitVec4(l331).xyz;
+    vec3 l332Hash = ihash3AsUnitVec4(l332).xyz;
+    // Vectors to V from each lattice point
+    const float radius = WORLEY_RADIUS_DOUBLE_3D;
+    vec3 v001 = l001 + l001Hash * radius;
+    vec3 v002 = l002 + l002Hash * radius;
+    vec3 v010 = l010 + l010Hash * radius;
+    vec3 v011 = l011 + l011Hash * radius;
+    vec3 v012 = l012 + l012Hash * radius;
+    vec3 v013 = l013 + l013Hash * radius;
+    vec3 v020 = l020 + l020Hash * radius;
+    vec3 v021 = l021 + l021Hash * radius;
+    vec3 v022 = l022 + l022Hash * radius;
+    vec3 v023 = l023 + l023Hash * radius;
+    vec3 v031 = l031 + l031Hash * radius;
+    vec3 v032 = l032 + l032Hash * radius;
+    vec3 v100 = l100 + l100Hash * radius;
+    vec3 v101 = l101 + l101Hash * radius;
+    vec3 v102 = l102 + l102Hash * radius;
+    vec3 v103 = l103 + l103Hash * radius;
+    vec3 v110 = l110 + l110Hash * radius;
+    vec3 v111 = l111 + l111Hash * radius;
+    vec3 v112 = l112 + l112Hash * radius;
+    vec3 v113 = l113 + l113Hash * radius;
+    vec3 v120 = l120 + l120Hash * radius;
+    vec3 v121 = l121 + l121Hash * radius;
+    vec3 v122 = l122 + l122Hash * radius;
+    vec3 v123 = l123 + l123Hash * radius;
+    vec3 v130 = l130 + l130Hash * radius;
+    vec3 v131 = l131 + l131Hash * radius;
+    vec3 v132 = l132 + l132Hash * radius;
+    vec3 v133 = l133 + l133Hash * radius;
+    vec3 v200 = l200 + l200Hash * radius;
+    vec3 v201 = l201 + l201Hash * radius;
+    vec3 v202 = l202 + l202Hash * radius;
+    vec3 v203 = l203 + l203Hash * radius;
+    vec3 v210 = l210 + l210Hash * radius;
+    vec3 v211 = l211 + l211Hash * radius;
+    vec3 v212 = l212 + l212Hash * radius;
+    vec3 v213 = l213 + l213Hash * radius;
+    vec3 v220 = l220 + l220Hash * radius;
+    vec3 v221 = l221 + l221Hash * radius;
+    vec3 v222 = l222 + l222Hash * radius;
+    vec3 v223 = l223 + l223Hash * radius;
+    vec3 v230 = l230 + l230Hash * radius;
+    vec3 v231 = l231 + l231Hash * radius;
+    vec3 v232 = l232 + l232Hash * radius;
+    vec3 v233 = l233 + l233Hash * radius;
+    vec3 v301 = l301 + l301Hash * radius;
+    vec3 v302 = l302 + l302Hash * radius;
+    vec3 v310 = l310 + l310Hash * radius;
+    vec3 v311 = l311 + l311Hash * radius;
+    vec3 v312 = l312 + l312Hash * radius;
+    vec3 v313 = l313 + l313Hash * radius;
+    vec3 v320 = l320 + l320Hash * radius;
+    vec3 v321 = l321 + l321Hash * radius;
+    vec3 v322 = l322 + l322Hash * radius;
+    vec3 v323 = l323 + l323Hash * radius;
+    vec3 v331 = l331 + l331Hash * radius;
+    vec3 v332 = l332 + l332Hash * radius;
+
+    // Distance to the closest point
+    float m = FLOAT_MAX;
+    m = min(m, length(v001 - v));
+    m = min(m, length(v002 - v));
+    m = min(m, length(v010 - v));
+    m = min(m, length(v011 - v));
+    m = min(m, length(v012 - v));
+    m = min(m, length(v013 - v));
+    m = min(m, length(v020 - v));
+    m = min(m, length(v021 - v));
+    m = min(m, length(v022 - v));
+    m = min(m, length(v023 - v));
+    m = min(m, length(v031 - v));
+    m = min(m, length(v032 - v));
+    m = min(m, length(v100 - v));
+    m = min(m, length(v101 - v));
+    m = min(m, length(v102 - v));
+    m = min(m, length(v103 - v));
+    m = min(m, length(v110 - v));
+    m = min(m, length(v111 - v));
+    m = min(m, length(v112 - v));
+    m = min(m, length(v113 - v));
+    m = min(m, length(v120 - v));
+    m = min(m, length(v121 - v));
+    m = min(m, length(v122 - v));
+    m = min(m, length(v123 - v));
+    m = min(m, length(v130 - v));
+    m = min(m, length(v131 - v));
+    m = min(m, length(v132 - v));
+    m = min(m, length(v133 - v));
+    m = min(m, length(v200 - v));
+    m = min(m, length(v201 - v));
+    m = min(m, length(v202 - v));
+    m = min(m, length(v203 - v));
+    m = min(m, length(v210 - v));
+    m = min(m, length(v211 - v));
+    m = min(m, length(v212 - v));
+    m = min(m, length(v213 - v));
+    m = min(m, length(v220 - v));
+    m = min(m, length(v221 - v));
+    m = min(m, length(v222 - v));
+    m = min(m, length(v223 - v));
+    m = min(m, length(v230 - v));
+    m = min(m, length(v231 - v));
+    m = min(m, length(v232 - v));
+    m = min(m, length(v233 - v));
+    m = min(m, length(v301 - v));
+    m = min(m, length(v302 - v));
+    m = min(m, length(v310 - v));
+    m = min(m, length(v311 - v));
+    m = min(m, length(v312 - v));
+    m = min(m, length(v313 - v));
+    m = min(m, length(v320 - v));
+    m = min(m, length(v321 - v));
+    m = min(m, length(v322 - v));
+    m = min(m, length(v323 - v));
+    m = min(m, length(v331 - v));
+    m = min(m, length(v332 - v));
+
+    return m;
+}
+
+vec3 worleyNoiseUnsignedDoubleGradient3(vec3 v) {
+    // Lattice point integer coordinates
+    ivec3 l000 = ivec3(floor(v)) - ivec3(1, 1, 1);
+    ivec3 l001 = l000 + ivec3(0, 0, 1);
+    ivec3 l002 = l000 + ivec3(0, 0, 2);
+    ivec3 l010 = l000 + ivec3(0, 1, 0);
+    ivec3 l011 = l000 + ivec3(0, 1, 1);
+    ivec3 l012 = l000 + ivec3(0, 1, 2);
+    ivec3 l013 = l000 + ivec3(0, 1, 3);
+    ivec3 l020 = l000 + ivec3(0, 2, 0);
+    ivec3 l021 = l000 + ivec3(0, 2, 1);
+    ivec3 l022 = l000 + ivec3(0, 2, 2);
+    ivec3 l023 = l000 + ivec3(0, 2, 3);
+    ivec3 l031 = l000 + ivec3(0, 3, 1);
+    ivec3 l032 = l000 + ivec3(0, 3, 2);
+    ivec3 l100 = l000 + ivec3(1, 0, 0);
+    ivec3 l101 = l000 + ivec3(1, 0, 1);
+    ivec3 l102 = l000 + ivec3(1, 0, 2);
+    ivec3 l103 = l000 + ivec3(1, 0, 3);
+    ivec3 l110 = l000 + ivec3(1, 1, 0);
+    ivec3 l111 = l000 + ivec3(1, 1, 1);
+    ivec3 l112 = l000 + ivec3(1, 1, 2);
+    ivec3 l113 = l000 + ivec3(1, 1, 3);
+    ivec3 l120 = l000 + ivec3(1, 2, 0);
+    ivec3 l121 = l000 + ivec3(1, 2, 1);
+    ivec3 l122 = l000 + ivec3(1, 2, 2);
+    ivec3 l123 = l000 + ivec3(1, 2, 3);
+    ivec3 l130 = l000 + ivec3(1, 3, 0);
+    ivec3 l131 = l000 + ivec3(1, 3, 1);
+    ivec3 l132 = l000 + ivec3(1, 3, 2);
+    ivec3 l133 = l000 + ivec3(1, 3, 3);
+    ivec3 l200 = l000 + ivec3(2, 0, 0);
+    ivec3 l201 = l000 + ivec3(2, 0, 1);
+    ivec3 l202 = l000 + ivec3(2, 0, 2);
+    ivec3 l203 = l000 + ivec3(2, 0, 3);
+    ivec3 l210 = l000 + ivec3(2, 1, 0);
+    ivec3 l211 = l000 + ivec3(2, 1, 1);
+    ivec3 l212 = l000 + ivec3(2, 1, 2);
+    ivec3 l213 = l000 + ivec3(2, 1, 3);
+    ivec3 l220 = l000 + ivec3(2, 2, 0);
+    ivec3 l221 = l000 + ivec3(2, 2, 1);
+    ivec3 l222 = l000 + ivec3(2, 2, 2);
+    ivec3 l223 = l000 + ivec3(2, 2, 3);
+    ivec3 l230 = l000 + ivec3(2, 3, 0);
+    ivec3 l231 = l000 + ivec3(2, 3, 1);
+    ivec3 l232 = l000 + ivec3(2, 3, 2);
+    ivec3 l233 = l000 + ivec3(2, 3, 3);
+    ivec3 l301 = l000 + ivec3(3, 0, 1);
+    ivec3 l302 = l000 + ivec3(3, 0, 2);
+    ivec3 l310 = l000 + ivec3(3, 1, 0);
+    ivec3 l311 = l000 + ivec3(3, 1, 1);
+    ivec3 l312 = l000 + ivec3(3, 1, 2);
+    ivec3 l313 = l000 + ivec3(3, 1, 3);
+    ivec3 l320 = l000 + ivec3(3, 2, 0);
+    ivec3 l321 = l000 + ivec3(3, 2, 1);
+    ivec3 l322 = l000 + ivec3(3, 2, 2);
+    ivec3 l323 = l000 + ivec3(3, 2, 3);
+    ivec3 l331 = l000 + ivec3(3, 3, 1);
+    ivec3 l332 = l000 + ivec3(3, 3, 2);
+    // Deterministically random values for lattice points
+    // Excluding corner points (those made of only 0's and 3's)
+    vec3 l001Hash = ihash3AsUnitVec4(l001).xyz;
+    vec3 l002Hash = ihash3AsUnitVec4(l002).xyz;
+    vec3 l010Hash = ihash3AsUnitVec4(l010).xyz;
+    vec3 l011Hash = ihash3AsUnitVec4(l011).xyz;
+    vec3 l012Hash = ihash3AsUnitVec4(l012).xyz;
+    vec3 l013Hash = ihash3AsUnitVec4(l013).xyz;
+    vec3 l020Hash = ihash3AsUnitVec4(l020).xyz;
+    vec3 l021Hash = ihash3AsUnitVec4(l021).xyz;
+    vec3 l022Hash = ihash3AsUnitVec4(l022).xyz;
+    vec3 l023Hash = ihash3AsUnitVec4(l023).xyz;
+    vec3 l031Hash = ihash3AsUnitVec4(l031).xyz;
+    vec3 l032Hash = ihash3AsUnitVec4(l032).xyz;
+    vec3 l100Hash = ihash3AsUnitVec4(l100).xyz;
+    vec3 l101Hash = ihash3AsUnitVec4(l101).xyz;
+    vec3 l102Hash = ihash3AsUnitVec4(l102).xyz;
+    vec3 l103Hash = ihash3AsUnitVec4(l103).xyz;
+    vec3 l110Hash = ihash3AsUnitVec4(l110).xyz;
+    vec3 l111Hash = ihash3AsUnitVec4(l111).xyz;
+    vec3 l112Hash = ihash3AsUnitVec4(l112).xyz;
+    vec3 l113Hash = ihash3AsUnitVec4(l113).xyz;
+    vec3 l120Hash = ihash3AsUnitVec4(l120).xyz;
+    vec3 l121Hash = ihash3AsUnitVec4(l121).xyz;
+    vec3 l122Hash = ihash3AsUnitVec4(l122).xyz;
+    vec3 l123Hash = ihash3AsUnitVec4(l123).xyz;
+    vec3 l130Hash = ihash3AsUnitVec4(l130).xyz;
+    vec3 l131Hash = ihash3AsUnitVec4(l131).xyz;
+    vec3 l132Hash = ihash3AsUnitVec4(l132).xyz;
+    vec3 l133Hash = ihash3AsUnitVec4(l133).xyz;
+    vec3 l200Hash = ihash3AsUnitVec4(l200).xyz;
+    vec3 l201Hash = ihash3AsUnitVec4(l201).xyz;
+    vec3 l202Hash = ihash3AsUnitVec4(l202).xyz;
+    vec3 l203Hash = ihash3AsUnitVec4(l203).xyz;
+    vec3 l210Hash = ihash3AsUnitVec4(l210).xyz;
+    vec3 l211Hash = ihash3AsUnitVec4(l211).xyz;
+    vec3 l212Hash = ihash3AsUnitVec4(l212).xyz;
+    vec3 l213Hash = ihash3AsUnitVec4(l213).xyz;
+    vec3 l220Hash = ihash3AsUnitVec4(l220).xyz;
+    vec3 l221Hash = ihash3AsUnitVec4(l221).xyz;
+    vec3 l222Hash = ihash3AsUnitVec4(l222).xyz;
+    vec3 l223Hash = ihash3AsUnitVec4(l223).xyz;
+    vec3 l230Hash = ihash3AsUnitVec4(l230).xyz;
+    vec3 l231Hash = ihash3AsUnitVec4(l231).xyz;
+    vec3 l232Hash = ihash3AsUnitVec4(l232).xyz;
+    vec3 l233Hash = ihash3AsUnitVec4(l233).xyz;
+    vec3 l301Hash = ihash3AsUnitVec4(l301).xyz;
+    vec3 l302Hash = ihash3AsUnitVec4(l302).xyz;
+    vec3 l310Hash = ihash3AsUnitVec4(l310).xyz;
+    vec3 l311Hash = ihash3AsUnitVec4(l311).xyz;
+    vec3 l312Hash = ihash3AsUnitVec4(l312).xyz;
+    vec3 l313Hash = ihash3AsUnitVec4(l313).xyz;
+    vec3 l320Hash = ihash3AsUnitVec4(l320).xyz;
+    vec3 l321Hash = ihash3AsUnitVec4(l321).xyz;
+    vec3 l322Hash = ihash3AsUnitVec4(l322).xyz;
+    vec3 l323Hash = ihash3AsUnitVec4(l323).xyz;
+    vec3 l331Hash = ihash3AsUnitVec4(l331).xyz;
+    vec3 l332Hash = ihash3AsUnitVec4(l332).xyz;
+    // Vectors to V from each lattice point
+    const float radius = WORLEY_RADIUS_DOUBLE_3D;
+    vec3 v001 = l001 + l001Hash * radius;
+    vec3 v002 = l002 + l002Hash * radius;
+    vec3 v010 = l010 + l010Hash * radius;
+    vec3 v011 = l011 + l011Hash * radius;
+    vec3 v012 = l012 + l012Hash * radius;
+    vec3 v013 = l013 + l013Hash * radius;
+    vec3 v020 = l020 + l020Hash * radius;
+    vec3 v021 = l021 + l021Hash * radius;
+    vec3 v022 = l022 + l022Hash * radius;
+    vec3 v023 = l023 + l023Hash * radius;
+    vec3 v031 = l031 + l031Hash * radius;
+    vec3 v032 = l032 + l032Hash * radius;
+    vec3 v100 = l100 + l100Hash * radius;
+    vec3 v101 = l101 + l101Hash * radius;
+    vec3 v102 = l102 + l102Hash * radius;
+    vec3 v103 = l103 + l103Hash * radius;
+    vec3 v110 = l110 + l110Hash * radius;
+    vec3 v111 = l111 + l111Hash * radius;
+    vec3 v112 = l112 + l112Hash * radius;
+    vec3 v113 = l113 + l113Hash * radius;
+    vec3 v120 = l120 + l120Hash * radius;
+    vec3 v121 = l121 + l121Hash * radius;
+    vec3 v122 = l122 + l122Hash * radius;
+    vec3 v123 = l123 + l123Hash * radius;
+    vec3 v130 = l130 + l130Hash * radius;
+    vec3 v131 = l131 + l131Hash * radius;
+    vec3 v132 = l132 + l132Hash * radius;
+    vec3 v133 = l133 + l133Hash * radius;
+    vec3 v200 = l200 + l200Hash * radius;
+    vec3 v201 = l201 + l201Hash * radius;
+    vec3 v202 = l202 + l202Hash * radius;
+    vec3 v203 = l203 + l203Hash * radius;
+    vec3 v210 = l210 + l210Hash * radius;
+    vec3 v211 = l211 + l211Hash * radius;
+    vec3 v212 = l212 + l212Hash * radius;
+    vec3 v213 = l213 + l213Hash * radius;
+    vec3 v220 = l220 + l220Hash * radius;
+    vec3 v221 = l221 + l221Hash * radius;
+    vec3 v222 = l222 + l222Hash * radius;
+    vec3 v223 = l223 + l223Hash * radius;
+    vec3 v230 = l230 + l230Hash * radius;
+    vec3 v231 = l231 + l231Hash * radius;
+    vec3 v232 = l232 + l232Hash * radius;
+    vec3 v233 = l233 + l233Hash * radius;
+    vec3 v301 = l301 + l301Hash * radius;
+    vec3 v302 = l302 + l302Hash * radius;
+    vec3 v310 = l310 + l310Hash * radius;
+    vec3 v311 = l311 + l311Hash * radius;
+    vec3 v312 = l312 + l312Hash * radius;
+    vec3 v313 = l313 + l313Hash * radius;
+    vec3 v320 = l320 + l320Hash * radius;
+    vec3 v321 = l321 + l321Hash * radius;
+    vec3 v322 = l322 + l322Hash * radius;
+    vec3 v323 = l323 + l323Hash * radius;
+    vec3 v331 = l331 + l331Hash * radius;
+    vec3 v332 = l332 + l332Hash * radius;
+
+    // Distance to the closest point
+    float m = FLOAT_MAX;
+    vec3 closestPoint = vec3(0);
+    minVector(v001 - v, m, closestPoint);
+    minVector(v002 - v, m, closestPoint);
+    minVector(v010 - v, m, closestPoint);
+    minVector(v011 - v, m, closestPoint);
+    minVector(v012 - v, m, closestPoint);
+    minVector(v013 - v, m, closestPoint);
+    minVector(v020 - v, m, closestPoint);
+    minVector(v021 - v, m, closestPoint);
+    minVector(v022 - v, m, closestPoint);
+    minVector(v023 - v, m, closestPoint);
+    minVector(v031 - v, m, closestPoint);
+    minVector(v032 - v, m, closestPoint);
+    minVector(v100 - v, m, closestPoint);
+    minVector(v101 - v, m, closestPoint);
+    minVector(v102 - v, m, closestPoint);
+    minVector(v103 - v, m, closestPoint);
+    minVector(v110 - v, m, closestPoint);
+    minVector(v111 - v, m, closestPoint);
+    minVector(v112 - v, m, closestPoint);
+    minVector(v113 - v, m, closestPoint);
+    minVector(v120 - v, m, closestPoint);
+    minVector(v121 - v, m, closestPoint);
+    minVector(v122 - v, m, closestPoint);
+    minVector(v123 - v, m, closestPoint);
+    minVector(v130 - v, m, closestPoint);
+    minVector(v131 - v, m, closestPoint);
+    minVector(v132 - v, m, closestPoint);
+    minVector(v133 - v, m, closestPoint);
+    minVector(v200 - v, m, closestPoint);
+    minVector(v201 - v, m, closestPoint);
+    minVector(v202 - v, m, closestPoint);
+    minVector(v203 - v, m, closestPoint);
+    minVector(v210 - v, m, closestPoint);
+    minVector(v211 - v, m, closestPoint);
+    minVector(v212 - v, m, closestPoint);
+    minVector(v213 - v, m, closestPoint);
+    minVector(v220 - v, m, closestPoint);
+    minVector(v221 - v, m, closestPoint);
+    minVector(v222 - v, m, closestPoint);
+    minVector(v223 - v, m, closestPoint);
+    minVector(v230 - v, m, closestPoint);
+    minVector(v231 - v, m, closestPoint);
+    minVector(v232 - v, m, closestPoint);
+    minVector(v233 - v, m, closestPoint);
+    minVector(v301 - v, m, closestPoint);
+    minVector(v302 - v, m, closestPoint);
+    minVector(v310 - v, m, closestPoint);
+    minVector(v311 - v, m, closestPoint);
+    minVector(v312 - v, m, closestPoint);
+    minVector(v313 - v, m, closestPoint);
+    minVector(v320 - v, m, closestPoint);
+    minVector(v321 - v, m, closestPoint);
+    minVector(v322 - v, m, closestPoint);
+    minVector(v323 - v, m, closestPoint);
+    minVector(v331 - v, m, closestPoint);
+    minVector(v332 - v, m, closestPoint);
+
+    return -normalize(closestPoint);
+}
 
 /*
  * Macros to compute fractal versions of noise functions with the following parameters:
