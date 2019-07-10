@@ -1916,31 +1916,6 @@ vec3  perlinNoiseUnsignedGradient3(vec3 v)  { return perlinNoiseSignedGradient3(
 vec4  perlinNoiseUnsignedGradient4(vec4 v)  { return perlinNoiseSignedGradient4(v) * 0.5; }
 
 /*
- * Implementations of fractal sums with the following parameters:
- * x or v:     Input vector;
- * lacunarity: Input multiplier for each layer, typically > 1;
- * gain:       Output multiplier for each layer, typically in (0; 1);
- */
-
-float valueNoiseFractalUnsigned1(float x, float lacunarity, float gain, uint layers) {
-    float result = 0.0;
-    float inMultiplier = 1.0;
-    float outMultiplier = 1.0;
-    float range = 0.0;
-
-    for (uint i = 0; i < layers; i++) {
-        result += valueNoiseUnsigned1(x * inMultiplier) * outMultiplier;
-        range += outMultiplier;
-        inMultiplier *= lacunarity;
-        outMultiplier *= gain;
-    }
-
-    float normalizedResult = result / range;
-
-    return normalizedResult;
-}
-
-/*
  * Macros to compute fractal versions of noise functions with the following parameters:
  *
  * tyAssignTo: The type representing the dimension of the noise function (typically `float`, but also `float, `vec2`, `vec3`, `vec4` for noise function derivatives);
