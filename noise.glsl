@@ -3044,10 +3044,33 @@ do {                                                                            
     identAssignTo = normalizedResult;                                              \
 } while(false);
 
+#define FRACTALIFY_GRAD(tyAssignTo, tyInput, identAssignTo, identNoiseFunction, exprV, exprLacunarity, exprGain, exprLayers) ;\
+tyAssignTo identAssignTo;                                                                    \
+do {                                                                                         \
+    tyAssignTo result = tyAssignTo(0.0);                                                     \
+    tyInput    inMultiplier = tyInput(1.0);                                                  \
+    tyAssignTo outMultiplier = tyAssignTo(1.0);                                              \
+    tyAssignTo range = tyAssignTo(0.0);                                                      \
+                                                                                             \
+    for (uint i = 0; i < uint(exprLayers); i++) {                                            \
+        result += identNoiseFunction((exprV) * inMultiplier) * inMultiplier * outMultiplier; \
+        range += outMultiplier;                                                              \
+        inMultiplier *= tyInput(exprLacunarity);                                             \
+        outMultiplier *= tyAssignTo(exprGain);                                               \
+    }                                                                                        \
+                                                                                             \
+    tyAssignTo normalizedResult = result / range;                                            \
+    identAssignTo = normalizedResult;                                                        \
+} while(false);
+
 // A version of `FRACTALIFY`, where `exprGain = 1 / exprLacunarity`
 #define FRACTALIFY_PINK(tyAssignTo, tyInput, identAssignTo, identNoiseFunction, exprV, exprLacunarity, exprLayers) \
-    FRACTALIFY(tyAssignTo, tyInput, identAssignTo, identNoiseFunction, exprV, exprLacunarity, (1.0 / exprLacunarity), exprLayers)
+    FRACTALIFY(tyAssignTo, tyInput, identAssignTo, identNoiseFunction, exprV, exprLacunarity, (1.0 / (exprLacunarity)), exprLayers)
+#define FRACTALIFY_GRAD_PINK(tyAssignTo, tyInput, identAssignTo, identNoiseFunction, exprV, exprLacunarity, exprLayers) \
+    FRACTALIFY_GRAD(tyAssignTo, tyInput, identAssignTo, identNoiseFunction, exprV, exprLacunarity, (1.0 / (exprLacunarity)), exprLayers)
 
 // A version of `FRACTALIFY`, where `exprLacunarity = 2` and `exprGain = 0.5`
 #define FRACTALIFY_BROWN(tyAssignTo, tyInput, identAssignTo, identNoiseFunction, exprV, exprLayers) \
     FRACTALIFY_PINK(tyAssignTo, tyInput, identAssignTo, identNoiseFunction, exprV, 2.0, exprLayers)
+#define FRACTALIFY_GRAD_BROWN(tyAssignTo, tyInput, identAssignTo, identNoiseFunction, exprV, exprLayers) \
+    FRACTALIFY_GRAD_PINK(tyAssignTo, tyInput, identAssignTo, identNoiseFunction, exprV, 2.0, exprLayers)
