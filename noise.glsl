@@ -3026,41 +3026,43 @@ vec3 worleyNoiseUnsignedDoubleGradient3(vec3 v) {
  * exprLayers: The number of layers of the noise to sum up;
  */
 #define FRACTALIFY(tyAssignTo, tyInput, identAssignTo, identNoiseFunction, exprV, exprLacunarity, exprGain, exprLayers) ;\
-tyAssignTo identAssignTo;                                                          \
-do {                                                                               \
-    tyAssignTo result = tyAssignTo(0.0);                                           \
-    tyInput    inMultiplier = tyInput(1.0);                                        \
-    tyAssignTo outMultiplier = tyAssignTo(1.0);                                    \
-    tyAssignTo range = tyAssignTo(0.0);                                            \
-                                                                                   \
-    for (uint i = 0; i < uint(exprLayers); i++) {                                  \
-        result += identNoiseFunction((exprV) * inMultiplier) * outMultiplier;      \
-        range += outMultiplier;                                                    \
-        inMultiplier *= tyInput(exprLacunarity);                                   \
-        outMultiplier *= tyAssignTo(exprGain);                                     \
-    }                                                                              \
-                                                                                   \
-    tyAssignTo normalizedResult = result / range;                                  \
-    identAssignTo = normalizedResult;                                              \
+tyAssignTo identAssignTo;                                                                                           \
+do {                                                                                                                \
+    tyAssignTo result = tyAssignTo(0.0);                                                                            \
+    tyInput    inMultiplier = tyInput(1.0);                                                                         \
+    tyAssignTo outMultiplier = tyAssignTo(1.0);                                                                     \
+    tyAssignTo range = tyAssignTo(0.0);                                                                             \
+                                                                                                                    \
+    for (uint i = 0; i < uint(ceil(exprLayers)); i++) {                                                             \
+        float layerContribution = i < uint(floor(exprLayers)) ? 1.0 : noiseInterpolation(fract(float(exprLayers))); \
+        result += identNoiseFunction((exprV) * inMultiplier) * outMultiplier * layerContribution;                   \
+        range += outMultiplier * layerContribution;                                                                 \
+        inMultiplier *= tyInput(exprLacunarity);                                                                    \
+        outMultiplier *= tyAssignTo(exprGain);                                                                      \
+    }                                                                                                               \
+                                                                                                                    \
+    tyAssignTo normalizedResult = result / range;                                                                   \
+    identAssignTo = normalizedResult;                                                                               \
 } while(false);
 
 #define FRACTALIFY_GRAD(tyAssignTo, tyInput, identAssignTo, identNoiseFunction, exprV, exprLacunarity, exprGain, exprLayers) ;\
-tyAssignTo identAssignTo;                                                                    \
-do {                                                                                         \
-    tyAssignTo result = tyAssignTo(0.0);                                                     \
-    tyInput    inMultiplier = tyInput(1.0);                                                  \
-    tyAssignTo outMultiplier = tyAssignTo(1.0);                                              \
-    tyAssignTo range = tyAssignTo(0.0);                                                      \
-                                                                                             \
-    for (uint i = 0; i < uint(exprLayers); i++) {                                            \
-        result += identNoiseFunction((exprV) * inMultiplier) * inMultiplier * outMultiplier; \
-        range += outMultiplier;                                                              \
-        inMultiplier *= tyInput(exprLacunarity);                                             \
-        outMultiplier *= tyAssignTo(exprGain);                                               \
-    }                                                                                        \
-                                                                                             \
-    tyAssignTo normalizedResult = result / range;                                            \
-    identAssignTo = normalizedResult;                                                        \
+tyAssignTo identAssignTo;                                                                                           \
+do {                                                                                                                \
+    tyAssignTo result = tyAssignTo(0.0);                                                                            \
+    tyInput    inMultiplier = tyInput(1.0);                                                                         \
+    tyAssignTo outMultiplier = tyAssignTo(1.0);                                                                     \
+    tyAssignTo range = tyAssignTo(0.0);                                                                             \
+                                                                                                                    \
+    for (uint i = 0; i < uint(ceil(exprLayers)); i++) {                                                             \
+        float layerContribution = i < uint(floor(exprLayers)) ? 1.0 : noiseInterpolation(fract(float(exprLayers))); \
+        result += identNoiseFunction((exprV) * inMultiplier) * inMultiplier * outMultiplier * layerContribution;    \
+        range += outMultiplier * layerContribution;                                                                 \
+        inMultiplier *= tyInput(exprLacunarity);                                                                    \
+        outMultiplier *= tyAssignTo(exprGain);                                                                      \
+    }                                                                                                               \
+                                                                                                                    \
+    tyAssignTo normalizedResult = result / range;                                                                   \
+    identAssignTo = normalizedResult;                                                                               \
 } while(false);
 
 // A version of `FRACTALIFY`, where `exprGain = 1 / exprLacunarity`
